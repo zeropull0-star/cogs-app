@@ -450,18 +450,24 @@ def _text(c, x, y, txt, font, size, color, align="L"):
 
 
 # ── 정보 2단 표 (공급받는자|공급자) ──────────────────────
-def _draw_info_grid(c, vendor, company, x, y, w, accent, light, xlight, border_c):
+# doc_type 이 '발주서' 인 경우:
+#   우리(company)는 물건을 '공급받는자'(왼쪽), 상대(vendor)는 '공급자'(오른쪽)
+# 견적서/거래명세서:
+#   상대(vendor)가 '공급받는자'(왼쪽), 우리(company)가 '공급자(발행)'(오른쪽)
+def _draw_info_grid(c, vendor, company, x, y, w, accent, light, xlight, border_c, doc_type=None):
     ROW = 7 * mm; LBL = 17 * mm; HALF = w / 2
+    is_po = (getattr(doc_type, "value", None) == "발주서")
+    left, right = (company, vendor) if is_po else (vendor, company)
     has_mgr = True  # 담당자 행 항상 표시 (값 없어도)
     rows = [
-        ("상    호",   vendor.name    or "", company.name    or ""),
-        ("대 표 자",   vendor.ceo     or "", company.ceo     or ""),
-        ("사업자번호", vendor.biz_no  or "", company.biz_no  or ""),
-        ("주    소",   vendor.addr    or "", company.addr    or ""),
+        ("상    호",   left.name    or "", right.name    or ""),
+        ("대 표 자",   left.ceo     or "", right.ceo     or ""),
+        ("사업자번호", left.biz_no  or "", right.biz_no  or ""),
+        ("주    소",   left.addr    or "", right.addr    or ""),
     ]
     if has_mgr:
-        rows.append(("담 당 자", vendor.manager or "", company.manager or ""))
-    rows.append(("연 락 처", vendor.phone or "", company.phone or ""))
+        rows.append(("담 당 자", left.manager or "", right.manager or ""))
+    rows.append(("연 락 처", left.phone or "", right.phone or ""))
 
     n  = len(rows)
     bh = ROW * n
@@ -500,14 +506,19 @@ def _draw_info_grid(c, vendor, company, x, y, w, accent, light, xlight, border_c
     _border_rect(c, x, top, w, total_h, accent, 0.8)
     _vline(c, x+HALF, top, top + total_h, accent, 0.8)
 
-    # 직인 - 공급자 데이터 영역 세로 중앙, 우측 끝
+    # 직인 - 발행회사(company) 데이터 영역 세로 중앙
+    # 발주서면 우리(company)가 왼쪽(공급받는자) → 직인도 왼쪽 칸
     seal_path = company.seal_path if hasattr(company, "seal_path") else None
     seal_mm   = 18 * mm
     if seal_path and os.path.exists(seal_path):
         # top = 데이터 하단, top+bh = 데이터 상단
         data_center = top + bh / 2
+        if is_po:
+            seal_x = x + HALF - seal_mm - 1*mm   # 왼쪽 칸 우측 끝
+        else:
+            seal_x = x + w - seal_mm - 1*mm      # 전체 우측 끝
         _maybe_img(c, seal_path,
-                   x + w - seal_mm - 1*mm,
+                   seal_x,
                    data_center - seal_mm / 2,
                    seal_mm, seal_mm)
 
@@ -711,7 +722,7 @@ def _draw_first_header(c, doc_type, tx, vendor, company):
     # ── 정보 그리드 (공급받는자/공급자) ──
     grid_y      = doc_y - 2*mm
     grid_bottom = _draw_info_grid(c, vendor, company, M, grid_y, TW,
-                                  accent, light, xlight, border_c)
+                                  accent, light, xlight, border_c, doc_type)
 
     # ── 건명 바 (정보 그리드 아래, 크게) ──
     memo_txt = _first_line(tx.description, 60) or ""
@@ -932,14 +943,17 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
     R += 1
 
     # ══ 4. 정보 그리드 ════════════════════════════════════════
-    # 왼쪽: A:B=라벨, C:E=값 / 오른쪽: F=라벨, G:H=값
+    # 왼쪽(공급받는자): A:B=라벨, C:E=값 / 오른쪽(공급자): F=라벨, G:H=값
+    # 발주서는 우리(company)가 공급받는자(왼쪽) ↔ 상대(vendor)가 공급자(오른쪽)
+    is_po = (doc_type == DocType.발주서)
+    left_src, right_src = (company, vendor) if is_po else (vendor, company)
     has_manager = True
-    left_rows  = [("상    호", vendor.name or ""), ("대 표 자", vendor.ceo or ""),
-                  ("사업자번호", vendor.biz_no or ""), ("주    소", vendor.addr or ""),
-                  ("담 당 자", vendor.manager or ""), ("연 락 처", vendor.phone or "")]
-    right_rows = [("상    호", company.name or ""), ("대 표 자", company.ceo or ""),
-                  ("사업자번호", company.biz_no or ""), ("주    소", company.addr or ""),
-                  ("담 당 자", company.manager or ""), ("연 락 처", company.phone or "")]
+    left_rows  = [("상    호", left_src.name or ""), ("대 표 자", left_src.ceo or ""),
+                  ("사업자번호", left_src.biz_no or ""), ("주    소", left_src.addr or ""),
+                  ("담 당 자", left_src.manager or ""), ("연 락 처", left_src.phone or "")]
+    right_rows = [("상    호", right_src.name or ""), ("대 표 자", right_src.ceo or ""),
+                  ("사업자번호", right_src.biz_no or ""), ("주    소", right_src.addr or ""),
+                  ("담 당 자", right_src.manager or ""), ("연 락 처", right_src.phone or "")]
 
     seal_row = R
     for i, ((ll, lv), (rl, rv)) in enumerate(zip(left_rows, right_rows)):
@@ -954,13 +968,14 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
             mc(R, 7, R, 8); wr(R, 7, rv, size=10, bg=C_WHT, align="left")
         R += 1
 
-    # 직인
+    # 직인 - 발행회사(company) 위치에 찍음
+    # 발주서면 우리(company)가 왼쪽(공급받는자) → 왼쪽 영역(E열)
     SEAL_PX = 87
     if company.seal_path and os.path.exists(company.seal_path):
         try:
             img = XLImage(company.seal_path)
             img.width = SEAL_PX; img.height = SEAL_PX
-            img.anchor = f"H{seal_row}"
+            img.anchor = f"E{seal_row}" if is_po else f"H{seal_row}"
             ws.add_image(img)
         except Exception: pass
 
