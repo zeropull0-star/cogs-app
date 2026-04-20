@@ -1,0 +1,32 @@
+﻿# Node
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 환경변수/시크릿
+.env
+.env.local
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# DB / 빌드 산출물
+*.sqlite
+*.db
