@@ -1,0 +1,67 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger_pw_change_me
+    volumes:
+      - ledger_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgresql+psycopg://ledger:ledger_pw_change_me@db:5432/ledger
+
+      # JWT
+      SECRET_KEY: change_me_long_random_string
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
+
+      # 관리자
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin1234
+
+      # 회사 정보
+      COMPANY_NAME: "부원정보 주식회사"
+      COMPANY_BIZNO: "328-81-02550"
+      COMPANY_MANAGER: "김현수 부장"
+      COMPANY_PHONE: "010-4236-8448"
+      COMPANY_ADDR: "강원특별자치도 동해시 중앙로 173 2층"
+
+      # 직인
+      SEAL_PNG_PATH: /app/assets/seal.png
+
+      # ✅ 문서번호 자동생성 규칙 (요청: BWIS + 오늘날짜)
+      DOCNO_PREFIX: "BWIS"
+      DOCNO_DATE_FMT: "%Y%m%d"     # 예: 20260226 (원하면 "%y%m%d" 로 바꾸면 260226)
+
+    volumes:
+      - ./api/assets:/app/assets:ro
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read(); print('ok')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  web:
+    build: ./web
+    ports:
+      - "8088:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  ledger_db_data:
