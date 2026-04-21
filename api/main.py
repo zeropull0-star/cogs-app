@@ -284,6 +284,7 @@ class TxIn(BaseModel):
     company_id: Optional[int] = None
     description: Optional[str] = None
     vat_rate: float = Field(default=0.10, ge=0, le=1)
+    vat_included: bool = False
     doc_no: Optional[str] = None
     items: List[TxItemIn] = Field(default_factory=list)
 
@@ -340,10 +341,20 @@ def _gen_doc_no(dt: datetime, vendor_prefix: Optional[str] = None) -> str:
     return f"{prefix}-{dt.strftime(DOCNO_DATE_FMT)}"
 
 
-def _calc_amounts(items: List[TxItemIn], vat_rate: float) -> Tuple[int, int, int]:
-    supply = sum(_safe_int(it.qty * it.unit_price) for it in items)
-    vat    = _safe_int(supply * float(vat_rate))
-    return supply, vat, supply + vat
+def _calc_amounts(items: List[TxItemIn], vat_rate: float,
+                  vat_included: bool = False) -> Tuple[int, int, int]:
+    gross = sum(_safe_int(it.qty * it.unit_price) for it in items)
+    rate  = float(vat_rate)
+    if vat_included and rate > 0:
+        # 입력 금액이 부가세 포함이므로 역산: 공급가 = 합계 / (1+rate)
+        supply = _safe_int(gross / (1.0 + rate))
+        vat    = gross - supply
+        total  = gross
+    else:
+        supply = gross
+        vat    = _safe_int(supply * rate)
+        total  = supply + vat
+    return supply, vat, total
 
 
 def _first_line(memo: Optional[str], max_len: int = 50) -> str:
@@ -416,6 +427,24 @@ def _pdf_lighten(hex6: str, f: float):
     return colors.Color(r/255, g/255, b/255)
 
 
+def _pastelize_hex(hex6: str, factor: float = 0.55) -> str:
+    h = (hex6 or "").lstrip("#")
+    if len(h) != 6: h = "2563eb"
+    try:
+        r = int(h[0:2],16); g = int(h[2:4],16); b = int(h[4:6],16)
+    except ValueError:
+        r, g, b = 0x25, 0x63, 0xeb
+    r = min(255, int(r+(255-r)*factor))
+    g = min(255, int(g+(255-g)*factor))
+    b = min(255, int(b+(255-b)*factor))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _accent_hex(company) -> str:
+    base = getattr(company, "color", None) or "#2563eb"
+    return _pastelize_hex(base)
+
+
 # ── 공통 드로잉 헬퍼 ─────────────────────────────────────
 def _filled_rect(c, x, y, w, h, fill, stroke_color=None, stroke_w=0.5):
     c.setFillColor(fill)
@@ -478,8 +507,8 @@ def _draw_info_grid(c, vendor, company, x, y, w, accent, light, xlight, border_c
     _filled_rect(c, x,        top - HDR_H, HALF, HDR_H, accent)
     _filled_rect(c, x + HALF, top - HDR_H, HALF, HDR_H, accent)
     _vline(c, x+HALF, top - HDR_H, top, colors.HexColor("#ffffff"), 0.3)
-    _text(c, x + HALF/2,        top - HDR_H + 2.5*mm, "공급받는자",    FONT, 8.5, colors.white, "C")
-    _text(c, x + HALF + HALF/2, top - HDR_H + 2.5*mm, "공급자 (발행)", FONT, 8.5, colors.white, "C")
+    _text(c, x + HALF/2,        top - HDR_H + 2.5*mm, "공급받는자",    FONT, 8.5, colors.HexColor("#334155"), "C")
+    _text(c, x + HALF + HALF/2, top - HDR_H + 2.5*mm, "공급자 (발행)", FONT, 8.5, colors.HexColor("#334155"), "C")
     top -= HDR_H
 
     # 데이터 행
@@ -618,7 +647,7 @@ def _draw_items(c, rows_data, col_widths, aligns, row_h, hdr_h,
 
     # 헤더 텍스트
     ty = y - hdr_h + 2.8*mm
-    c.setFillColor(colors.white); c.setFont(FONT, 9)
+    c.setFillColor(colors.HexColor("#334155")); c.setFont(FONT, 9)
     cur_x = x
     for cell, cw, al in zip(thead, col_widths, aligns):
         t = str(cell or "")
@@ -672,10 +701,10 @@ def _draw_summary_box(c, tx, x, y, tw, accent, light, xlight, border_c):
 
     # 합계 행
     _filled_rect(c, bx, sy, SW, TOT, accent)
-    _text(c, bx+4*mm,   sy+3.5*mm, "합    계", FONT, 10, colors.white)
+    _text(c, bx+4*mm,   sy+3.5*mm, "합    계", FONT, 10, colors.HexColor("#334155"))
     _text(c, bx+SW-3*mm, sy+3.5*mm,
           _fmt_money(_safe_int(tx.total_amount)) + " 원",
-          FONT, 11, colors.white, "R")
+          FONT, 11, colors.HexColor("#334155"), "R")
 
     # 외곽
     _border_rect(c, bx, sy, SW, sh, accent, 0.7)
@@ -685,17 +714,19 @@ def _draw_summary_box(c, tx, x, y, tw, accent, light, xlight, border_c):
 # ── 첫 페이지 헤더 ───────────────────────────────────────
 def _draw_first_header(c, doc_type, tx, vendor, company):
     TW     = W - 2*M
-    accent = _pdf_color(company.color or "#2563eb") if hasattr(company,"color") else _pdf_color("#2563eb")
-    light  = _pdf_lighten(company.color or "#2563eb", 0.85)
-    xlight = _pdf_lighten(company.color or "#2563eb", 0.93)
-    border_c = _pdf_lighten(company.color or "#2563eb", 0.50)
+    base   = _accent_hex(company)
+    accent = _pdf_color(base)
+    light  = _pdf_lighten(base, 0.60)
+    xlight = _pdf_lighten(base, 0.80)
+    border_c = _pdf_lighten(base, 0.30)
+    title_fg = colors.HexColor("#334155")
 
     # ── 제목 바 ──
     TITLE_H = 13 * mm
     _filled_rect(c, M, H-M-TITLE_H, TW, TITLE_H, accent)
-    _filled_rect(c, M, H-M-TITLE_H, 4*mm, TITLE_H, _pdf_lighten(company.color or "#2563eb", 0.15))
+    _filled_rect(c, M, H-M-TITLE_H, 4*mm, TITLE_H, _pdf_color(base))
     title = "  ".join(doc_type.value)
-    _text(c, W/2, H-M-TITLE_H+4*mm, title, FONT, 17, colors.white, "C")
+    _text(c, W/2, H-M-TITLE_H+4*mm, title, FONT, 17, title_fg, "C")
 
     # 로고
     logo = company.logo_path if company.logo_path else "/app/assets/logo.png"
@@ -740,12 +771,13 @@ def _draw_first_header(c, doc_type, tx, vendor, company):
 # ── 이어지는 페이지 헤더 ─────────────────────────────────
 def _draw_cont_header(c, doc_type, tx, page, company):
     TW     = W - 2*M
-    accent = _pdf_color(company.color or "#2563eb") if hasattr(company,"color") else _pdf_color("#2563eb")
+    base   = _accent_hex(company)
+    accent = _pdf_color(base)
     BH = 9*mm
     _filled_rect(c, M, H-M-BH, TW, BH, accent)
-    _filled_rect(c, M, H-M-BH, 4*mm, BH, _pdf_lighten(company.color or "#2563eb", 0.15))
+    _filled_rect(c, M, H-M-BH, 4*mm, BH, _pdf_color(base))
     label = f"{doc_type.value}  ·  {tx.doc_no or ''}  ·  {page}페이지"
-    _text(c, M+8*mm, H-M-BH+3*mm, label, FONT, 9, colors.white)
+    _text(c, M+8*mm, H-M-BH+3*mm, label, FONT, 9, colors.HexColor("#334155"))
     return H - M - BH - 3*mm
 
 
@@ -763,10 +795,11 @@ def build_pdf(doc_type: DocType, tx: Tx, vendor: Vendor,
     ALIGNS    = ["C","L","L","C","R","R"]
     WRAP_COLS = {1, 2}   # 품목명, 규격 줄바꿈 허용
 
-    accent   = _pdf_color(company.color or "#2563eb") if hasattr(company,"color") else _pdf_color("#2563eb")
-    light    = _pdf_lighten(company.color or "#2563eb", 0.85)
-    xlight   = _pdf_lighten(company.color or "#2563eb", 0.93)
-    border_c = _pdf_lighten(company.color or "#2563eb", 0.55)
+    base     = _accent_hex(company)
+    accent   = _pdf_color(base)
+    light    = _pdf_lighten(base, 0.60)
+    xlight   = _pdf_lighten(base, 0.80)
+    border_c = _pdf_lighten(base, 0.30)
 
     total = len(items); page = 1; idx = 0
 
@@ -875,9 +908,10 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
     for col, w in zip("ABCDEFGH", [4.1, 23.8, 13, 13, 5.1, 27.9, 17.6, 16.6]):
         ws.column_dimensions[col].width = w
 
-    # ── 회사 색상 ─────────────────────────────────────────────
-    raw_color = (company.color or "#2563eb").lstrip("#")
-    if len(raw_color) != 6: raw_color = "2563eb"
+    # ── 회사 색상 (파스텔톤) ──────────────────────────────────
+    raw_color = _accent_hex(company).lstrip("#").upper()
+    if len(raw_color) != 6: raw_color = "92B1F5"
+    TXT_ON_HDR = "334155"  # 파스텔 위 진한 슬레이트 텍스트
 
     def _lighten(hex6, factor):
         r=int(hex6[0:2],16); g=int(hex6[2:4],16); b=int(hex6[4:6],16)
@@ -916,7 +950,7 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
 
     # ══ 1. 제목 (A:H 전체) ════════════════════════════════════
     mc(R, 1, R, 8)
-    wr(R, 1, "  ".join(doc_type.value), bold=True, size=28, color="FFFFFF",
+    wr(R, 1, "  ".join(doc_type.value), bold=True, size=28, color=TXT_ON_HDR,
        bg=C_HDR, align="center")
     ws.row_dimensions[R].height = 38
     R += 1
@@ -937,9 +971,9 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
     # A:E=공급받는자, F:H=공급자
     ws.row_dimensions[R].height = 35
     mc(R, 1, R, 5)
-    wr(R, 1, "공  급  받  는  자", bold=True, size=10, color="FFFFFF", bg=C_HDR, align="center")
+    wr(R, 1, "공  급  받  는  자", bold=True, size=10, color=TXT_ON_HDR, bg=C_HDR, align="center")
     mc(R, 6, R, 8)
-    wr(R, 6, "공  급  자  (발  행)", bold=True, size=10, color="FFFFFF", bg=C_HDR, align="center")
+    wr(R, 6, "공  급  자  (발  행)", bold=True, size=10, color=TXT_ON_HDR, bg=C_HDR, align="center")
     R += 1
 
     # ══ 4. 정보 그리드 ════════════════════════════════════════
@@ -996,7 +1030,7 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
     mc(R, 3, R, 4)  # 규격 C:D 병합
     for ci, hd in [(1,"번호"),(2,"품  목  명"),(3,"규    격"),
                    (5,"수량"),(6,"단 가 (원)"),(7,"금 액 (원)"),(8,"비 고")]:
-        wr(R, ci, hd, bold=True, size=9.5, color="FFFFFF", bg=C_HDR, align="center")
+        wr(R, ci, hd, bold=True, size=9.5, color=TXT_ON_HDR, bg=C_HDR, align="center")
     ws.freeze_panes = f"A{R+1}"
     R += 1
 
@@ -1041,7 +1075,7 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
         ws.row_dimensions[R].height = 24 if is_total else 18
         bg_l = C_HDR if is_total else C_LBL
         bg_v = C_HDR if is_total else C_LBL
-        fc   = "FFFFFF" if is_total else raw_color
+        fc   = TXT_ON_HDR if is_total else raw_color
         sz   = 12 if is_total else 9
         mc(R, 1, R, 5); wr(R, 1, lb, bold=is_total, size=sz, color=fc, bg=bg_l, align="center")
         mc(R, 6, R, 8); wr(R, 6, val, bold=is_total, size=sz, color=fc, bg=bg_v, align="right", numfmt="#,##0")
@@ -1188,7 +1222,7 @@ def _items_of(db: Session, tx_id: int) -> List[TxItem]:
 @app.post("/api/tx", response_model=TxOut)
 def create_tx(payload: TxIn, user: User = Depends(get_current_user)):
     tx_date          = payload.tx_date or datetime.now(timezone.utc)
-    supply, vat, tot = _calc_amounts(payload.items, payload.vat_rate)
+    supply, vat, tot = _calc_amounts(payload.items, payload.vat_rate, payload.vat_included)
     with db_session() as db:
         vendor = db.query(Vendor).filter(Vendor.id == payload.vendor_id).first()
         if not vendor: raise HTTPException(400, "Invalid vendor_id")
@@ -1236,7 +1270,7 @@ def list_tx(kind: Optional[TxKind] = Query(default=None),
 @app.put("/api/tx/{tx_id}", response_model=TxOut)
 def update_tx(tx_id: int, payload: TxIn, user: User = Depends(get_current_user)):
     tx_date          = payload.tx_date or datetime.now(timezone.utc)
-    supply, vat, tot = _calc_amounts(payload.items, payload.vat_rate)
+    supply, vat, tot = _calc_amounts(payload.items, payload.vat_rate, payload.vat_included)
     with db_session() as db:
         t = db.query(Tx).filter(Tx.id == tx_id).first()
         if not t: raise HTTPException(404, "TX not found")
@@ -1342,13 +1376,28 @@ def stats_summary(range: str = Query(default="7d"), user: User = Depends(get_cur
 
 @app.get("/api/stats/xlsx")
 def stats_xlsx(range_key: str = Query(default="7d", alias="range"),
+               vendor_id: Optional[int] = Query(default=None),
+               kind: Optional[TxKind] = Query(default=None),
                user: User = Depends(get_current_user)):
     start, label = _range_start(range_key)
     with db_session() as db:
-        txs   = (db.query(Tx).filter(Tx.tx_date >= start)
-                 .order_by(Tx.tx_date.asc(), Tx.id.asc()).all())
+        qs = db.query(Tx).filter(Tx.tx_date >= start)
+        if vendor_id: qs = qs.filter(Tx.vendor_id == vendor_id)
+        if kind:      qs = qs.filter(Tx.kind == kind)
+        txs   = qs.order_by(Tx.tx_date.asc(), Tx.id.asc()).all()
         sales = [t for t in txs if t.kind == TxKind.매출]
         purch = [t for t in txs if t.kind == TxKind.매입]
+
+        vendor_name = ""
+        if vendor_id:
+            v = db.query(Vendor).filter(Vendor.id == vendor_id).first()
+            vendor_name = v.name if v else ""
+        # label 에 필터 정보 추가
+        extra_parts = []
+        if vendor_name:   extra_parts.append(vendor_name)
+        if kind:          extra_parts.append(kind.value)
+        if extra_parts:
+            label = f"{label} · {' / '.join(extra_parts)}"
 
         # ── 공통 스타일 헬퍼 ──────────────────────────────────
         FN   = "맑은 고딕"
@@ -1451,8 +1500,12 @@ def stats_xlsx(range_key: str = Query(default="7d", alias="range"),
         ALIGNS = ["center","center","left","left","right","right","right","left"]
         NUMFMTS = [None, None, None, None, "#,##0", "#,##0", "#,##0", None]
 
-        for sname, rows, hdr_bg in [("매출 상세", sales, C_SALE),
-                                     ("매입 상세", purch, C_BUY)]:
+        sheet_list = []
+        if not kind or kind == TxKind.매출:
+            sheet_list.append(("매출 상세", sales, C_SALE))
+        if not kind or kind == TxKind.매입:
+            sheet_list.append(("매입 상세", purch, C_BUY))
+        for sname, rows, hdr_bg in sheet_list:
             ws2 = wb.create_sheet(sname)
             ws2.page_setup.paperSize = ws2.PAPERSIZE_A4
             ws2.page_setup.orientation = "landscape"
@@ -1510,7 +1563,10 @@ def stats_xlsx(range_key: str = Query(default="7d", alias="range"),
         bio = BytesIO()
         wb.save(bio)
 
-    fname = f"ledger_stats_{range_key}.xlsx"
+    suffix_parts = [range_key]
+    if kind:        suffix_parts.append(kind.value)
+    if vendor_id:   suffix_parts.append(f"v{vendor_id}")
+    fname = f"ledger_stats_{'_'.join(suffix_parts)}.xlsx"
     return Response(content=bio.getvalue(),
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})

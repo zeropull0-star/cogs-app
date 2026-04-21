@@ -47,6 +47,7 @@ export default function App() {
 
   // 거래 등록
   const [txKind, setTxKind]   = useState("매출");
+  const [vatIncluded, setVatIncluded] = useState(false); // 단가가 VAT 포함 가격인지
   const [txDate, setTxDate]   = useState(() => {
     const d = new Date(); const p = n => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -62,6 +63,9 @@ export default function App() {
   // 거래내역 뷰: ""=거래처별 그룹화, 특정 ID=해당 거래처 flat 테이블
   const [txFilterVendorId, setTxFilterVendorId] = useState("");
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
+
+  // 거래처 관리: 목록 펼치기 토글
+  const [vendorListOpen, setVendorListOpen] = useState(false);
 
   // ── API helper ───────────────────────────────────────────
   async function apiFetch(path, opts = {}) {
@@ -312,7 +316,8 @@ export default function App() {
     const body = JSON.stringify({ kind: txKind, vendor_id: Number(selectedVendorId),
       company_id: selectedCoId ? Number(selectedCoId) : null,
       tx_date: new Date(txDate).toISOString(), description: memo.trim() || null,
-      vat_rate: 0.1, doc_no: finalDocNo, items: cleanItems });
+      vat_rate: 0.1, vat_included: vatIncluded,
+      doc_no: finalDocNo, items: cleanItems });
     const isEdit = editingTxId !== null;
     const res = await apiFetch(isEdit ? `/tx/${editingTxId}` : "/tx", {
       method: isEdit ? "PUT" : "POST",
@@ -360,12 +365,19 @@ export default function App() {
     ].join("\n"));
   }
 
-  async function downloadStatsXlsx(rk) {
-    const res = await apiFetch(`/stats/xlsx?range=${rk}`);
+  async function downloadStatsXlsx(rk, opts = {}) {
+    const { kind, vendorId, filename } = opts;
+    const params = new URLSearchParams({ range: rk });
+    if (kind)     params.set("kind", kind);
+    if (vendorId) params.set("vendor_id", String(vendorId));
+    const res = await apiFetch(`/stats/xlsx?${params.toString()}`);
     if (!res.ok) { alert(`실패: ${await res.text()}`); return; }
     const blob = await res.blob();
+    const suffix = [rk, kind, vendorId ? `v${vendorId}` : ""].filter(Boolean).join("_");
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = `ledger_stats_${rk}.xlsx`; a.click();
+    a.href = URL.createObjectURL(blob);
+    a.download = filename || `ledger_stats_${suffix}.xlsx`;
+    a.click();
   }
 
   // ── 거래내역 그룹핑/필터 ─────────────────────────────────
@@ -551,24 +563,76 @@ export default function App() {
 
           {/* ── 거래처 관리 ── */}
           <section className="card">
-            <div className="h">거래처</div>
+            <div className="h">
+              거래처
+              <span className="co-badge" style={{marginLeft:8}}>총 {vendors.length}개</span>
+            </div>
 
             <div className="vendorBar">
-              <input value={vendorQuery} onChange={e => setVendorQuery(e.target.value)}
-                placeholder="검색 (이름/사업자번호/대표자/연락처)" />
-              <select value={selectedVendorId} onChange={e => setSelectedVendorId(e.target.value)}>
-                <option value="">거래처 선택</option>
-                {filteredVendors.map(v => (
-                  <option key={v.id} value={v.id}>{v.name}{v.biz_no ? ` (${v.biz_no})` : ""}</option>
-                ))}
-              </select>
+              <div className="row" style={{gap:8}}>
+                <input value={vendorQuery} onChange={e => setVendorQuery(e.target.value)}
+                  placeholder="검색 (이름/사업자번호/대표자/연락처)"
+                  onFocus={() => setVendorListOpen(true)}
+                  style={{flex:"1 1 auto"}} />
+                <button className="btn" type="button"
+                  onClick={() => setVendorListOpen(o => !o)}
+                  title="거래처 목록 펼치기/접기">
+                  {vendorListOpen ? "▲ 목록 접기" : `▼ 전체 목록 (${filteredVendors.length})`}
+                </button>
+              </div>
+
+              {/* 선택 요약 + 펼치기 버튼 */}
+              {!vendorListOpen && (
+                <div className="vendorPick">
+                  {selectedVendor ? (
+                    <div className="vendorPickSelected">
+                      <span className="pill">선택됨</span>
+                      <b>{selectedVendor.name}</b>
+                      {selectedVendor.biz_no && <span className="muted small"> ({selectedVendor.biz_no})</span>}
+                      <button className="btn small-btn" onClick={() => setSelectedVendorId("")}>해제</button>
+                    </div>
+                  ) : (
+                    <div className="muted small">선택된 거래처가 없습니다. 검색하거나 목록을 펼쳐 선택하세요.</div>
+                  )}
+                </div>
+              )}
+
+              {/* 거래처 목록 (펼침) */}
+              {vendorListOpen && (
+                <div className="vendorList">
+                  {filteredVendors.length === 0 && (
+                    <div className="muted small pad" style={{textAlign:"center"}}>
+                      검색 결과가 없습니다.
+                    </div>
+                  )}
+                  {filteredVendors.map(v => {
+                    const isSel = String(v.id) === String(selectedVendorId);
+                    return (
+                      <div key={v.id}
+                        className={`vendorItem ${isSel?"on":""}`}
+                        onClick={() => { setSelectedVendorId(String(v.id)); setVendorListOpen(false); }}>
+                        <div className="vendorItemMain">
+                          <b>{v.name}</b>
+                          {v.biz_no && <span className="muted small"> · {v.biz_no}</span>}
+                        </div>
+                        <div className="muted small vendorItemSub">
+                          {v.ceo   && <span>대표 {v.ceo}</span>}
+                          {v.phone && <span>{v.phone}</span>}
+                          {v.addr  && <span className="ellipsis">{v.addr}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="vendorBarBtns">
                 <button className="btn" onClick={beginEditVendor} disabled={!selectedVendorId}>수정</button>
                 <button className="btn danger" onClick={() => deleteVendor(selectedVendorId)} disabled={!selectedVendorId}>삭제</button>
               </div>
             </div>
 
-            {selectedVendor && (
+            {selectedVendor && !vendorListOpen && (
               <div className="selectedInfo">
                 <div className="name">{selectedVendor.name}</div>
                 <div className="muted small">
@@ -615,6 +679,19 @@ export default function App() {
                 ))}
               </select>
               <input type="datetime-local" value={txDate} onChange={e => setTxDate(e.target.value)} />
+            </div>
+            <div className="row vatRow" style={{marginTop:8}}>
+              <span className="muted small">부가세</span>
+              <button type="button"
+                className={`btn chip ${!vatIncluded?"chip-on":""}`}
+                onClick={() => setVatIncluded(false)}>
+                미포함 (별도 10%)
+              </button>
+              <button type="button"
+                className={`btn chip ${vatIncluded?"chip-on":""}`}
+                onClick={() => setVatIncluded(true)}>
+                포함 (단가에 10% 포함)
+              </button>
             </div>
             <div className="row" style={{marginTop:10}}>
               <input value={docNo} onChange={e => {
@@ -672,14 +749,17 @@ export default function App() {
           {/* ── 통계/백업 ── */}
           <section className="card wide">
             <div className="h">통계 / 백업 (기간 합계)</div>
-            <div className="row" style={{flexWrap:"wrap",gap:8}}>
-              {[["7d","1주"],["1m","1달"],["1y","1년"]].map(([k,l]) => (
-                <React.Fragment key={k}>
-                  <button className="btn" onClick={() => loadStats(k)}>최근 {l} 합계</button>
-                  <button className="btn primary" onClick={() => downloadStatsXlsx(k)}>최근 {l} 엑셀 백업</button>
-                </React.Fragment>
-              ))}
-            </div>
+            {[["7d","1주"],["1m","1달"],["1y","1년"]].map(([k,l]) => (
+              <div key={k} className="row statsRangeRow" style={{flexWrap:"wrap",gap:8,marginBottom:6}}>
+                <span className="rangeLabel">최근 {l}</span>
+                <button className="btn" onClick={() => loadStats(k)}>합계 조회</button>
+                <button className="btn primary" onClick={() => downloadStatsXlsx(k)}>전체 백업</button>
+                <button className="btn chip chip-sale"
+                  onClick={() => downloadStatsXlsx(k, { kind: "매출" })}>매출만</button>
+                <button className="btn chip chip-buy"
+                  onClick={() => downloadStatsXlsx(k, { kind: "매입" })}>매입만</button>
+              </div>
+            ))}
             {statsText
               ? <pre className="statsBox">{statsText}</pre>
               : <div className="muted small" style={{marginTop:8}}>버튼을 눌러 기간 합계를 확인하세요.</div>}
@@ -732,6 +812,16 @@ export default function App() {
                           공급가 <b>{g.supply.toLocaleString()}</b> ·
                           부가세 <b>{g.vat.toLocaleString()}</b> ·
                           합계 <b className="gTotal">{g.total.toLocaleString()}</b>원
+                        </span>
+                        <span className="gActions" onClick={e=>e.stopPropagation()}>
+                          <button className="btn small-btn"
+                            title="이 거래처 1년 엑셀 백업"
+                            onClick={() => downloadStatsXlsx("1y", {
+                              vendorId: g.vid,
+                              filename: `ledger_${g.vname}_1y.xlsx`,
+                            })}>
+                            📊 엑셀
+                          </button>
                         </span>
                       </div>
                       {expanded && (
@@ -936,6 +1026,51 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
 /* 거래내역 필터 바 */
 .txFilterBar{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;}
 .txFilterBar select{max-width:380px;}
+
+/* 거래처 목록(펼침) */
+.vendorList{
+  max-height:320px;overflow-y:auto;
+  border:1px solid var(--border);border-radius:12px;
+  background:rgba(0,0,0,0.22);
+  display:flex;flex-direction:column;
+}
+.vendorItem{
+  padding:10px 12px;cursor:pointer;
+  border-bottom:1px solid rgba(255,255,255,0.05);
+  transition:background .12s;
+}
+.vendorItem:last-child{border-bottom:none;}
+.vendorItem:hover{background:rgba(79,110,247,0.10);}
+.vendorItem.on{background:rgba(79,110,247,0.22);border-left:3px solid #4f6ef7;}
+.vendorItemMain{font-size:13px;}
+.vendorItemSub{display:flex;gap:10px;flex-wrap:wrap;margin-top:2px;}
+.vendorItemSub .ellipsis{max-width:220px;}
+.vendorPick{
+  padding:8px 12px;border:1px dashed var(--border);border-radius:10px;
+  background:rgba(0,0,0,0.14);
+}
+.vendorPickSelected{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+
+/* VAT 토글 chip */
+.vatRow{align-items:center;gap:8px;}
+.chip{height:28px;padding:0 12px;font-size:12px;border-radius:999px;
+  background:rgba(255,255,255,0.05);}
+.chip-on{background:rgba(79,110,247,0.75);border-color:rgba(79,110,247,0.95);font-weight:700;}
+.chip-sale{background:rgba(79,110,247,0.25);border-color:rgba(79,110,247,0.45);}
+.chip-sale:hover{background:rgba(79,110,247,0.45);}
+.chip-buy{background:rgba(226,77,77,0.22);border-color:rgba(226,77,77,0.45);}
+.chip-buy:hover{background:rgba(226,77,77,0.42);}
+
+/* 통계 기간 행 */
+.statsRangeRow{align-items:center;}
+.rangeLabel{
+  min-width:58px;font-weight:700;font-size:12px;color:var(--muted);
+  background:rgba(255,255,255,0.06);padding:4px 10px;border-radius:999px;
+  border:1px solid var(--border);
+}
+
+/* 그룹 헤더 내 액션 */
+.gActions{display:flex;gap:4px;margin-left:8px;}
 
 /* 거래처별 그룹 */
 .txGroups{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
