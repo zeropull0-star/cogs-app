@@ -333,6 +333,40 @@ export default function App() {
     if (res2.ok) setTxList(await res2.json());
   }
 
+  // ── PDF 견적서에서 품목 스캔 ─────────────────────────────
+  async function importItemsFromPdf(file) {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      alert("PDF 파일만 업로드 가능합니다."); return;
+    }
+    const fd = new FormData(); fd.append("file", file);
+    const res = await apiFetch("/tx/parse-pdf", { method: "POST", body: fd });
+    if (!res.ok) { alert(`스캔 실패: ${await res.text()}`); return; }
+    const data = await res.json();
+    if (!data.items || data.items.length === 0) {
+      alert("품목을 찾지 못했습니다. PDF의 표 구조를 인식할 수 없습니다.");
+      return;
+    }
+    const mapped = data.items.map(it => ({
+      name:       it.name       || "",
+      spec:       it.spec       || "",
+      qty:        Number(it.qty ?? 1),
+      unit_price: Number(it.unit_price ?? 0),
+    }));
+    // 기존 빈 행만 있으면 대체, 아니면 추가 여부 확인
+    const hasContent = items.some(it => (it.name || "").trim());
+    let next = mapped;
+    if (hasContent) {
+      const append = window.confirm(
+        `${data.items.length}개 품목을 찾았습니다.\n[확인] 기존 품목 뒤에 추가\n[취소] 기존을 모두 대체`
+      );
+      next = append ? [...items.filter(it => (it.name||"").trim()), ...mapped] : mapped;
+    }
+    setItems(next.length ? next : [{ name:"", spec:"", qty:1, unit_price:0 }]);
+    if (data.description && !memo) setMemo(data.description);
+    alert(`✅ ${data.items.length}개 품목을 자동 입력했습니다. 내용을 확인 후 저장하세요.`);
+  }
+
   async function deleteTx(txId) {
     if (!window.confirm(`TX ${txId} 삭제할까요?`)) return;
     const res = await apiFetch(`/tx/${txId}`, { method: "DELETE" });
@@ -708,7 +742,18 @@ export default function App() {
             <textarea value={memo} onChange={e => setMemo(e.target.value)}
               placeholder="메모/건명 (선택)" className="ta" />
 
-            <div className="h2">품목</div>
+            <div className="h2 pdfImportRow">
+              <span>품목</span>
+              <label className="btn small-btn pdfImportBtn" title="PDF 견적서의 표를 스캔해 품목을 자동 입력합니다.">
+                📎 PDF에서 가져오기
+                <input type="file" accept="application/pdf,.pdf" style={{display:"none"}}
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    importItemsFromPdf(f);
+                    e.target.value = "";
+                  }} />
+              </label>
+            </div>
             <div className="items">
               {items.map((it, idx) => (
                 <div key={idx} className="row itemRow">
@@ -1097,6 +1142,14 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
   margin-top:14px;padding:24px 16px;border:1px dashed var(--border);
   border-radius:12px;background:rgba(0,0,0,0.14);line-height:1.6;
 }
+
+/* PDF 가져오기 버튼 */
+.pdfImportRow{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.pdfImportBtn{
+  display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  background:rgba(22,163,74,0.2);border-color:rgba(22,163,74,0.45);
+}
+.pdfImportBtn:hover{background:rgba(22,163,74,0.4);}
 
 /* 거래처 목록(펼침) */
 .vendorList{

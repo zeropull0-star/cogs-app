@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Query, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer
@@ -1297,6 +1298,110 @@ def delete_tx(tx_id: int, user: User = Depends(get_current_user)):
         if not t: raise HTTPException(404, "TX not found")
         db.delete(t); db.commit()
         return {"ok": True}
+
+
+# ── PDF 견적서 → 품목 스캔 ──────────────────────────────────
+_HDR_KEYS = {
+    "name":  ["품목", "품명", "품 목 명", "품목명", "품   목   명", "item"],
+    "spec":  ["규격", "규 격", "spec", "사양"],
+    "qty":   ["수량", "수 량", "qty", "수량(ea)"],
+    "price": ["단가", "단 가", "price", "unit"],
+    "amt":   ["금액", "공급가", "금 액", "amount"],
+}
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", "", (s or "").lower())
+
+
+def _match_col(cell: str, keys: List[str]) -> bool:
+    c = _norm(cell)
+    return any(_norm(k) in c for k in keys)
+
+
+def _to_num(s: str) -> Optional[float]:
+    if s is None: return None
+    t = re.sub(r"[^\d.\-]", "", str(s))
+    if not t or t in ("-", "."): return None
+    try: return float(t)
+    except ValueError: return None
+
+
+def _parse_items_table(tbl: List[List[Optional[str]]]) -> List[Dict]:
+    if not tbl or len(tbl) < 2: return []
+    # 헤더 행 찾기 (상위 3개 행 내에서)
+    hdr_idx = -1; col_map = {}
+    for i, row in enumerate(tbl[:3]):
+        cells = [c or "" for c in row]
+        cm = {}
+        for ci, cell in enumerate(cells):
+            for key, kws in _HDR_KEYS.items():
+                if key not in cm and _match_col(cell, kws):
+                    cm[key] = ci
+        # 이름 + (수량 또는 단가) 둘 다 찾으면 헤더로 간주
+        if "name" in cm and ("qty" in cm or "price" in cm):
+            hdr_idx, col_map = i, cm; break
+    if hdr_idx < 0: return []
+
+    out = []
+    for row in tbl[hdr_idx + 1:]:
+        cells = [c or "" for c in row]
+        name = (cells[col_map["name"]] if col_map.get("name") is not None
+                and col_map["name"] < len(cells) else "").strip()
+        if not name: continue
+        # 합계/소계/배송/부가세 줄 제외
+        if re.search(r"합\s*계|소\s*계|부\s*가\s*세|공\s*급\s*가\s*액|총\s*계", name):
+            continue
+        spec = (cells[col_map["spec"]] if col_map.get("spec") is not None
+                and col_map["spec"] < len(cells) else "").strip()
+        qty  = _to_num(cells[col_map["qty"]])   if col_map.get("qty")   is not None and col_map["qty"]   < len(cells) else None
+        prc  = _to_num(cells[col_map["price"]]) if col_map.get("price") is not None and col_map["price"] < len(cells) else None
+        amt  = _to_num(cells[col_map["amt"]])   if col_map.get("amt")   is not None and col_map["amt"]   < len(cells) else None
+        # 단가만 없고 수량/금액 있으면 역산
+        if prc is None and qty and amt: prc = round(amt / qty)
+        if qty is None and prc and amt: qty = round(amt / prc, 2) if prc else None
+        out.append({
+            "name":       name[:80],
+            "spec":       spec[:80],
+            "qty":        qty if qty is not None else 1,
+            "unit_price": int(round(prc)) if prc is not None else 0,
+        })
+    return out
+
+
+@app.post("/api/tx/parse-pdf")
+async def parse_tx_pdf(file: UploadFile = File(...),
+                       user: User = Depends(get_current_user)):
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(400, "PDF 파일만 지원합니다.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "빈 파일입니다.")
+    try:
+        import pdfplumber
+    except ImportError:
+        raise HTTPException(500, "pdfplumber 미설치 — 컨테이너를 재빌드하세요.")
+
+    items: List[Dict] = []
+    memo = ""
+    try:
+        with pdfplumber.open(BytesIO(data)) as pdf:
+            for page in pdf.pages:
+                for tbl in (page.extract_tables() or []):
+                    items.extend(_parse_items_table(tbl))
+                if not memo:
+                    txt = page.extract_text() or ""
+                    m = re.search(r"건\s*명\s*[:：]?\s*([^\n]+)", txt)
+                    if m: memo = m.group(1).strip()[:80]
+    except Exception as ex:
+        raise HTTPException(400, f"PDF 파싱 실패: {ex}")
+
+    # 동일 품목 중복 제거 (연속)
+    dedup: List[Dict] = []
+    for it in items:
+        if dedup and dedup[-1] == it: continue
+        dedup.append(it)
+    return {"items": dedup, "description": memo, "count": len(dedup)}
 
 
 # ── 문서 다운로드 ─────────────────────────────────────────────

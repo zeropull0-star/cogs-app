@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir \
     fastapi uvicorn sqlalchemy psycopg[binary] python-jose pydantic \
     passlib==1.7.4 bcrypt==4.0.1 \
     python-multipart openpyxl \
-    pillow reportlab
+    pillow reportlab \
+    pdfplumber
 
 COPY . .
 
