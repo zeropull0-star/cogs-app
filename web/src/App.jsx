@@ -59,6 +59,10 @@ export default function App() {
   const [editingTxId, setEditingTxId] = useState(null);
   const [statsText, setStatsText] = useState("");
 
+  // 거래내역 뷰: ""=거래처별 그룹화, 특정 ID=해당 거래처 flat 테이블
+  const [txFilterVendorId, setTxFilterVendorId] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set());
+
   // ── API helper ───────────────────────────────────────────
   async function apiFetch(path, opts = {}) {
     const headers = {
@@ -364,6 +368,92 @@ export default function App() {
     a.href = URL.createObjectURL(blob); a.download = `ledger_stats_${rk}.xlsx`; a.click();
   }
 
+  // ── 거래내역 그룹핑/필터 ─────────────────────────────────
+  const filteredTxList = useMemo(() => {
+    if (!txFilterVendorId) return txList;
+    return txList.filter(t => String(t.vendor_id) === String(txFilterVendorId));
+  }, [txList, txFilterVendorId]);
+
+  const groupedTxList = useMemo(() => {
+    const map = new Map();
+    for (const tx of txList) {
+      const k = String(tx.vendor_id);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(tx);
+    }
+    const out = [];
+    for (const [vid, arr] of map) {
+      const vname = arr[0]?.vendor_name ||
+        vendors.find(v => String(v.id) === vid)?.name || `#${vid}`;
+      const supply = arr.reduce((s,t) => s + Number(t.supply_amount||0), 0);
+      const vat    = arr.reduce((s,t) => s + Number(t.vat_amount||0),    0);
+      const total  = arr.reduce((s,t) => s + Number(t.total_amount||0),  0);
+      const saleCount = arr.filter(t => t.kind === "매출").length;
+      const buyCount  = arr.filter(t => t.kind === "매입").length;
+      const items = [...arr].sort(
+        (a,b) => new Date(b.tx_date).getTime() - new Date(a.tx_date).getTime()
+      );
+      out.push({ vid, vname, items, count: arr.length,
+                 supply, vat, total, saleCount, buyCount });
+    }
+    out.sort((a,b) => a.vname.localeCompare(b.vname, "ko"));
+    return out;
+  }, [txList, vendors]);
+
+  function toggleGroup(vid) {
+    setExpandedGroups(prev => {
+      const n = new Set(prev);
+      if (n.has(vid)) n.delete(vid); else n.add(vid);
+      return n;
+    });
+  }
+  function expandAllGroups()   { setExpandedGroups(new Set(groupedTxList.map(g => g.vid))); }
+  function collapseAllGroups() { setExpandedGroups(new Set()); }
+
+  // ── 거래 행 렌더 (hideVendor: 거래처 컬럼 숨김) ──────────
+  function renderTxRow(tx, hideVendor = false) {
+    const when = tx.tx_date
+      ? new Date(tx.tx_date).toLocaleString("ko-KR",
+          {year:"2-digit",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})
+      : "";
+    const vname = tx.vendor_name ||
+      vendors.find(x => String(x.id) === String(tx.vendor_id))?.name || String(tx.vendor_id);
+    return (
+      <tr key={tx.id}>
+        <td>{tx.id}</td>
+        <td><span className={`badge ${tx.kind==="매출"?"sale":"buy"}`}>{tx.kind}</span></td>
+        {!hideVendor && <td className="ellipsis" title={vname}>{vname}</td>}
+        <td className="num">{Number(tx.supply_amount||0).toLocaleString()}</td>
+        <td className="num">{Number(tx.vat_amount||0).toLocaleString()}</td>
+        <td className="num fw">{Number(tx.total_amount||0).toLocaleString()}</td>
+        <td className="nowrap">{when}</td>
+        <td className="ellipsis" title={tx.doc_no||""}>{tx.doc_no||""}</td>
+        <td className="btnCell">
+          {[["견적서","견적서"],["발주서","발주서"],["거래명세서","명세서"]].map(([k,l])=>(
+            <button key={k} className="btn pdf-btn xsBtn"
+              onClick={()=>downloadDoc(tx.id,k,"pdf",`${l}_TX${tx.id}.pdf`)}>📄{l}</button>
+          ))}
+        </td>
+        <td className="btnCell">
+          {[["견적서","견적서"],["발주서","발주서"],["거래명세서","명세서"]].map(([k,l])=>(
+            <button key={k} className="btn excel-btn xsBtn"
+              onClick={()=>downloadDoc(tx.id,k,"excel",`${l}_TX${tx.id}.xlsx`)}>📊{l}</button>
+          ))}
+        </td>
+        <td><button className="btn xsBtn" onClick={()=>beginEditTx(tx)}>✏️</button>
+          {(() => {
+            const co = companies.find(c => String(c.id) === String(tx.company_id));
+            if (!co) return null;
+            const color = co.color || "#2563eb";
+            const short = co.name.replace(/\(주\)|주식회사|\(|\)/g,"").trim().slice(0,2);
+            return <span style={{marginLeft:4,display:"inline-block",padding:"2px 6px",borderRadius:"999px",fontSize:"11px",fontWeight:700,background:color+"22",color,border:`1px solid ${color}55`}}>{short}</span>;
+          })()}
+        </td>
+        <td><button className="btn danger xsBtn" onClick={()=>deleteTx(tx.id)}>삭제</button></td>
+      </tr>
+    );
+  }
+
   // ═══════════════════════════════════════════════════════════
   //  Render
   // ═══════════════════════════════════════════════════════════
@@ -601,64 +691,97 @@ export default function App() {
               거래내역 (총 {txList.length.toLocaleString()}건)
               {selectedCo && <span className="co-badge">발행 회사: {selectedCo.name}</span>}
             </div>
-            <div className="txTable">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th><th>구분</th><th>거래처</th>
-                    <th>공급가</th><th>부가세</th><th className="fw">합계</th>
-                    <th>일시</th><th>문서번호</th>
-                    <th>PDF</th><th>Excel</th>
-                    <th>수정</th><th>삭제</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {txList.map(tx => {
-                    const when = tx.tx_date
-                      ? new Date(tx.tx_date).toLocaleString("ko-KR",{year:"2-digit",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})
-                      : "";
-                    const vname = tx.vendor_name ||
-                      vendors.find(x=>String(x.id)===String(tx.vendor_id))?.name || String(tx.vendor_id);
-                    return (
-                      <tr key={tx.id}>
-                        <td>{tx.id}</td>
-                        <td><span className={`badge ${tx.kind==="매출"?"sale":"buy"}`}>{tx.kind}</span></td>
-                        <td className="ellipsis" title={vname}>{vname}</td>
-                        <td className="num">{Number(tx.supply_amount||0).toLocaleString()}</td>
-                        <td className="num">{Number(tx.vat_amount||0).toLocaleString()}</td>
-                        <td className="num fw">{Number(tx.total_amount||0).toLocaleString()}</td>
-                        <td className="nowrap">{when}</td>
-                        <td className="ellipsis" title={tx.doc_no||""}>{tx.doc_no||""}</td>
-                        <td className="btnCell">
-                          {[["견적서","견적서"],["발주서","발주서"],["거래명세서","명세서"]].map(([k,l])=>(
-                            <button key={k} className="btn pdf-btn xsBtn"
-                              onClick={()=>downloadDoc(tx.id,k,"pdf",`${l}_TX${tx.id}.pdf`)}>📄{l}</button>
-                          ))}
-                        </td>
-                        <td className="btnCell">
-                          {[["견적서","견적서"],["발주서","발주서"],["거래명세서","명세서"]].map(([k,l])=>(
-                            <button key={k} className="btn excel-btn xsBtn"
-                              onClick={()=>downloadDoc(tx.id,k,"excel",`${l}_TX${tx.id}.xlsx`)}>📊{l}</button>
-                          ))}
-                        </td>
-                        <td><button className="btn xsBtn" onClick={()=>beginEditTx(tx)}>✏️</button>
-                          {(() => {
-                            const co = companies.find(c => String(c.id) === String(tx.company_id));
-                            if (!co) return null;
-                            const color = co.color || "#2563eb";
-                            // 회사명 축약: 괄호/주식회사 등 제거 후 앞 2~3글자
-                            const short = co.name.replace(/\(주\)|주식회사|\(|\)/g,"").trim().slice(0,2);
-                            return <span style={{marginLeft:4,display:"inline-block",padding:"2px 6px",borderRadius:"999px",fontSize:"11px",fontWeight:700,background:color+"22",color,border:`1px solid ${color}55`}}>{short}</span>;
-                          })()}
-                        </td>
-                        <td><button className="btn danger xsBtn" onClick={()=>deleteTx(tx.id)}>삭제</button></td>
-                      </tr>
-                    );
-                  })}
-                  {txList.length===0 && <tr><td colSpan={12} className="muted pad" style={{textAlign:"center"}}>거래내역이 없습니다.</td></tr>}
-                </tbody>
-              </table>
+
+            {/* 필터 바 */}
+            <div className="txFilterBar">
+              <select value={txFilterVendorId} onChange={e=>setTxFilterVendorId(e.target.value)}>
+                <option value="">📂 거래처별 그룹 보기 (전체 {groupedTxList.length}개 업체)</option>
+                {vendors.map(v => (
+                  <option key={v.id} value={v.id}>{v.name}</option>
+                ))}
+              </select>
+              {!txFilterVendorId ? (
+                <>
+                  <button className="btn small-btn" onClick={expandAllGroups}>＋ 모두 펼치기</button>
+                  <button className="btn small-btn" onClick={collapseAllGroups}>－ 모두 접기</button>
+                </>
+              ) : (
+                <button className="btn small-btn" onClick={()=>setTxFilterVendorId("")}>← 그룹 보기로</button>
+              )}
             </div>
+
+            {/* 전체(그룹) 모드 */}
+            {!txFilterVendorId && (
+              <div className="txGroups">
+                {groupedTxList.length === 0 && (
+                  <div className="muted pad" style={{textAlign:"center"}}>거래내역이 없습니다.</div>
+                )}
+                {groupedTxList.map(g => {
+                  const expanded = expandedGroups.has(g.vid);
+                  return (
+                    <div key={g.vid} className={`txGroup ${expanded?"open":""}`}>
+                      <div className="txGroupHeader" onClick={()=>toggleGroup(g.vid)}>
+                        <span className="chev">{expanded ? "▼" : "▶"}</span>
+                        <span className="gName">{g.vname}</span>
+                        <span className="gMeta">
+                          <span className="pill">{g.count}건</span>
+                          {g.saleCount>0 && <span className="pill pill-sale">매출 {g.saleCount}</span>}
+                          {g.buyCount>0  && <span className="pill pill-buy">매입 {g.buyCount}</span>}
+                        </span>
+                        <span className="gSum">
+                          공급가 <b>{g.supply.toLocaleString()}</b> ·
+                          부가세 <b>{g.vat.toLocaleString()}</b> ·
+                          합계 <b className="gTotal">{g.total.toLocaleString()}</b>원
+                        </span>
+                      </div>
+                      {expanded && (
+                        <div className="txTable txTableGrouped">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>ID</th><th>구분</th>
+                                <th>공급가</th><th>부가세</th><th className="fw">합계</th>
+                                <th>일시</th><th>문서번호</th>
+                                <th>PDF</th><th>Excel</th>
+                                <th>수정</th><th>삭제</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {g.items.map(tx => renderTxRow(tx, true))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 특정 거래처 선택 모드 */}
+            {txFilterVendorId && (
+              <div className="txTable">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th><th>구분</th><th>거래처</th>
+                      <th>공급가</th><th>부가세</th><th className="fw">합계</th>
+                      <th>일시</th><th>문서번호</th>
+                      <th>PDF</th><th>Excel</th>
+                      <th>수정</th><th>삭제</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredTxList.map(tx => renderTxRow(tx, false))}
+                    {filteredTxList.length === 0 && (
+                      <tr><td colSpan={12} className="muted pad" style={{textAlign:"center"}}>
+                        선택한 거래처의 거래내역이 없습니다.
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
 
         </div>
@@ -809,4 +932,43 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
 .num{text-align:right;font-variant-numeric:tabular-nums;}
 .btnCell{display:flex;gap:3px;align-items:center;flex-wrap:nowrap;}
 .xsBtn{height:26px!important;padding:0 7px!important;font-size:11px!important;border-radius:8px!important;}
+
+/* 거래내역 필터 바 */
+.txFilterBar{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;}
+.txFilterBar select{max-width:380px;}
+
+/* 거래처별 그룹 */
+.txGroups{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+.txGroup{
+  border:1px solid var(--border);border-radius:12px;
+  background:rgba(0,0,0,0.18);overflow:hidden;transition:border-color .15s;
+}
+.txGroup.open{border-color:rgba(79,110,247,0.45);}
+.txGroupHeader{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;cursor:pointer;user-select:none;
+  transition:background .15s;
+}
+.txGroupHeader:hover{background:rgba(79,110,247,0.08);}
+.txGroup.open .txGroupHeader{background:rgba(79,110,247,0.10);}
+.chev{font-size:10px;width:14px;color:var(--muted);flex:0 0 auto;}
+.gName{font-weight:700;font-size:14px;min-width:120px;}
+.gMeta{display:flex;gap:5px;flex-wrap:wrap;align-items:center;}
+.pill{
+  font-size:11px;padding:2px 8px;border-radius:999px;
+  background:rgba(255,255,255,0.08);border:1px solid var(--border);
+  color:var(--muted);font-weight:600;
+}
+.pill-sale{background:rgba(79,110,247,0.2);color:#93c5fd;border-color:rgba(79,110,247,0.4);}
+.pill-buy{background:rgba(226,77,77,0.18);color:#fca5a5;border-color:rgba(226,77,77,0.4);}
+.gSum{
+  margin-left:auto;font-size:12px;color:var(--muted);
+  font-variant-numeric:tabular-nums;
+}
+.gSum b{color:var(--text);}
+.gTotal{color:#22c55e!important;font-size:13px;}
+
+/* 그룹 내부 테이블: 거래처 컬럼 없음 → 최소폭 축소 */
+.txTableGrouped{padding:4px 10px 10px;}
+.txTableGrouped table{min-width:1080px;}
 `;
