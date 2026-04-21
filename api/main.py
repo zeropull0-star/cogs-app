@@ -507,8 +507,8 @@ def _draw_info_grid(c, vendor, company, x, y, w, accent, light, xlight, border_c
     _filled_rect(c, x,        top - HDR_H, HALF, HDR_H, accent)
     _filled_rect(c, x + HALF, top - HDR_H, HALF, HDR_H, accent)
     _vline(c, x+HALF, top - HDR_H, top, colors.HexColor("#ffffff"), 0.3)
-    _text(c, x + HALF/2,        top - HDR_H + 2.5*mm, "공급받는자",    FONT, 8.5, colors.HexColor("#334155"), "C")
-    _text(c, x + HALF + HALF/2, top - HDR_H + 2.5*mm, "공급자 (발행)", FONT, 8.5, colors.HexColor("#334155"), "C")
+    _text(c, x + HALF/2,        top - HDR_H + 2.5*mm, "공급받는자",    FONT, 8.5, colors.HexColor("#1e293b"), "C")
+    _text(c, x + HALF + HALF/2, top - HDR_H + 2.5*mm, "공급자 (발행)", FONT, 8.5, colors.HexColor("#1e293b"), "C")
     top -= HDR_H
 
     # 데이터 행
@@ -524,9 +524,9 @@ def _draw_info_grid(c, vendor, company, x, y, w, accent, light, xlight, border_c
         _vline(c, x+HALF+LBL, ry, ry+ROW, border_c, 0.3)
         # 텍스트
         mid = ry + ROW/2 - 1.5*mm
-        _text(c, x + LBL/2,             mid, lb, FONT, 7.5, accent, "C")
+        _text(c, x + LBL/2,             mid, lb, FONT, 7.5, colors.HexColor("#1e293b"), "C")
         _text(c, x + LBL + 2*mm,        mid, lv, FONT, 8,   colors.HexColor("#1e293b"))
-        _text(c, x+HALF + LBL/2,        mid, lb, FONT, 7.5, accent, "C")
+        _text(c, x+HALF + LBL/2,        mid, lb, FONT, 7.5, colors.HexColor("#1e293b"), "C")
         _text(c, x+HALF + LBL + 2*mm,   mid, rv, FONT, 8,   colors.HexColor("#1e293b"))
         top -= ROW
 
@@ -647,7 +647,7 @@ def _draw_items(c, rows_data, col_widths, aligns, row_h, hdr_h,
 
     # 헤더 텍스트
     ty = y - hdr_h + 2.8*mm
-    c.setFillColor(colors.HexColor("#334155")); c.setFont(FONT, 9)
+    c.setFillColor(colors.HexColor("#1e293b")); c.setFont(FONT, 9)
     cur_x = x
     for cell, cw, al in zip(thead, col_widths, aligns):
         t = str(cell or "")
@@ -696,15 +696,15 @@ def _draw_summary_box(c, tx, x, y, tw, accent, light, xlight, border_c):
         _filled_rect(c, bx+26*mm,   ry, SW-26*mm, ROW, xlight)
         _hline(c, bx, bx+SW, ry, border_c, 0.3)
         _vline(c, bx+26*mm, ry, ry+ROW, border_c, 0.3)
-        _text(c, bx+13*mm,   ry+ROW/2-1.5*mm, lb,  FONT, 8,  accent, "C")
+        _text(c, bx+13*mm,   ry+ROW/2-1.5*mm, lb,  FONT, 8,  colors.HexColor("#1e293b"), "C")
         _text(c, bx+SW-3*mm, ry+ROW/2-1.5*mm, val, FONT, 8.5, colors.HexColor("#1e293b"), "R")
 
     # 합계 행
     _filled_rect(c, bx, sy, SW, TOT, accent)
-    _text(c, bx+4*mm,   sy+3.5*mm, "합    계", FONT, 10, colors.HexColor("#334155"))
+    _text(c, bx+4*mm,   sy+3.5*mm, "합    계", FONT, 10, colors.HexColor("#1e293b"))
     _text(c, bx+SW-3*mm, sy+3.5*mm,
           _fmt_money(_safe_int(tx.total_amount)) + " 원",
-          FONT, 11, colors.HexColor("#334155"), "R")
+          FONT, 11, colors.HexColor("#1e293b"), "R")
 
     # 외곽
     _border_rect(c, bx, sy, SW, sh, accent, 0.7)
@@ -719,7 +719,7 @@ def _draw_first_header(c, doc_type, tx, vendor, company):
     light  = _pdf_lighten(base, 0.60)
     xlight = _pdf_lighten(base, 0.80)
     border_c = _pdf_lighten(base, 0.30)
-    title_fg = colors.HexColor("#334155")
+    title_fg = colors.HexColor("#1e293b")
 
     # ── 제목 바 ──
     TITLE_H = 13 * mm
@@ -740,12 +740,12 @@ def _draw_first_header(c, doc_type, tx, vendor, company):
     kst_doc = _to_kst(tx.tx_date).strftime("%Y년 %m월 %d일")
     ty = doc_y + 2.5*mm   # 텍스트 베이스라인 (아래서 위로)
     # 문서번호
-    _text(c, M+4*mm,          ty, "문서번호", FONT, 7.5, accent)
+    _text(c, M+4*mm,          ty, "문서번호", FONT, 7.5, colors.HexColor("#1e293b"))
     _text(c, M+22*mm,         ty, tx.doc_no or "", FONT, 9, colors.HexColor("#1e293b"))
     # 구분선
     _vline(c, M+TW*0.45, doc_y+1.5*mm, doc_y+DOC_H-1.5*mm, accent, 0.3)
     # 구분
-    _text(c, M+TW*0.45+4*mm,  ty, "구  분", FONT, 7.5, accent)
+    _text(c, M+TW*0.45+4*mm,  ty, "구  분", FONT, 7.5, colors.HexColor("#1e293b"))
     _text(c, M+TW*0.45+16*mm, ty, tx.kind.value, FONT, 9, colors.HexColor("#1e293b"))
     # 날짜 (우측)
     _text(c, W-M-4*mm,        ty, kst_doc, FONT, 8.5, colors.HexColor("#1e293b"), "R")
@@ -762,7 +762,7 @@ def _draw_first_header(c, doc_type, tx, vendor, company):
         memo_y = grid_bottom - 2*mm - MEMO_H
         _filled_rect(c, M, memo_y, TW, MEMO_H, xlight)
         _border_rect(c, M, memo_y, TW, MEMO_H, accent, 0.5)
-        _text(c, M+4*mm,  memo_y+2.2*mm, "건    명", FONT, 8, accent)
+        _text(c, M+4*mm,  memo_y+2.2*mm, "건    명", FONT, 8, colors.HexColor("#1e293b"))
         _text(c, M+22*mm, memo_y+2.2*mm, memo_txt, FONT, 10, colors.HexColor("#1e293b"))
         return memo_y - 3*mm
     return grid_bottom - 3*mm
@@ -777,7 +777,7 @@ def _draw_cont_header(c, doc_type, tx, page, company):
     _filled_rect(c, M, H-M-BH, TW, BH, accent)
     _filled_rect(c, M, H-M-BH, 4*mm, BH, _pdf_color(base))
     label = f"{doc_type.value}  ·  {tx.doc_no or ''}  ·  {page}페이지"
-    _text(c, M+8*mm, H-M-BH+3*mm, label, FONT, 9, colors.HexColor("#334155"))
+    _text(c, M+8*mm, H-M-BH+3*mm, label, FONT, 9, colors.HexColor("#1e293b"))
     return H - M - BH - 3*mm
 
 
@@ -911,7 +911,8 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
     # ── 회사 색상 (파스텔톤) ──────────────────────────────────
     raw_color = _accent_hex(company).lstrip("#").upper()
     if len(raw_color) != 6: raw_color = "92B1F5"
-    TXT_ON_HDR = "334155"  # 파스텔 위 진한 슬레이트 텍스트
+    TXT_ON_HDR = "1E293B"  # 파스텔 헤더 배경 위 텍스트 (진한 슬레이트)
+    TXT_LBL    = "1E293B"  # 라벨용 진한 슬레이트
 
     def _lighten(hex6, factor):
         r=int(hex6[0:2],16); g=int(hex6[2:4],16); b=int(hex6[4:6],16)
@@ -959,12 +960,12 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
     # A:B=라벨, C:E=값, F=구분라벨, G=값, H=날짜
     ws.row_dimensions[R].height = 30
     mc(R, 1, R, 2)
-    wr(R, 1, "문서번호", bold=True, size=10, color=raw_color, bg=C_LBL, align="center")
+    wr(R, 1, "문서번호", bold=True, size=10, color=TXT_LBL, bg=C_LBL, align="center")
     mc(R, 3, R, 5)
     wr(R, 3, tx.doc_no or "—", size=11, bg=C_WHT, align="center")
-    wr(R, 6, "구  분", bold=True, size=10, color=raw_color, bg=C_LBL, align="center")
+    wr(R, 6, "구  분", bold=True, size=10, color=TXT_LBL, bg=C_LBL, align="center")
     wr(R, 7, tx.kind.value, size=10, bg=C_WHT, align="center")
-    wr(R, 8, kst_date, size=10, color=raw_color, bg=C_LBL, align="right")
+    wr(R, 8, kst_date, size=10, color=TXT_LBL, bg=C_LBL, align="right")
     R += 1
 
     # ══ 3. 공급받는자 | 공급자 헤더 ══════════════════════════
@@ -992,9 +993,9 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
     seal_row = R
     for i, ((ll, lv), (rl, rv)) in enumerate(zip(left_rows, right_rows)):
         ws.row_dimensions[R].height = 22
-        mc(R, 1, R, 2); wr(R, 1, ll, bold=True, size=10, color=raw_color, bg=C_LBL, align="center")
+        mc(R, 1, R, 2); wr(R, 1, ll, bold=True, size=10, color=TXT_LBL, bg=C_LBL, align="center")
         mc(R, 3, R, 5); wr(R, 3, lv, size=10, bg=C_WHT, align="left")
-        wr(R, 6, rl, bold=True, size=10, color=raw_color, bg=C_LBL2, align="center")
+        wr(R, 6, rl, bold=True, size=10, color=TXT_LBL, bg=C_LBL2, align="center")
         if i == 0:
             wr(R, 7, rv, size=10, bg=C_WHT, align="left")
             wr(R, 8, "", bg=C_WHT)
@@ -1015,7 +1016,7 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
 
     # ══ 5. 건명 (A:B=라벨 3행병합, C:H=값 3행병합) ══════════
     mc(R, 1, R+2, 2)
-    wr(R, 1, "건    명", bold=True, size=8, color=raw_color, bg=C_LBL, align="center")
+    wr(R, 1, "건    명", bold=True, size=8, color=TXT_LBL, bg=C_LBL, align="center")
     mc(R, 3, R+2, 8)
     memo = _first_line(tx.description, 60) or ""
     wr(R, 3, memo, size=14, bg=C_WHT, align="center")
@@ -1075,7 +1076,7 @@ def build_excel(doc_type: DocType, tx: Tx, vendor: Vendor,
         ws.row_dimensions[R].height = 24 if is_total else 18
         bg_l = C_HDR if is_total else C_LBL
         bg_v = C_HDR if is_total else C_LBL
-        fc   = TXT_ON_HDR if is_total else raw_color
+        fc   = TXT_ON_HDR if is_total else TXT_LBL
         sz   = 12 if is_total else 9
         mc(R, 1, R, 5); wr(R, 1, lb, bold=is_total, size=sz, color=fc, bg=bg_l, align="center")
         mc(R, 6, R, 8); wr(R, 6, val, bold=is_total, size=sz, color=fc, bg=bg_v, align="right", numfmt="#,##0")

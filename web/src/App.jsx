@@ -66,6 +66,8 @@ export default function App() {
 
   // 거래처 관리: 목록 펼치기 토글
   const [vendorListOpen, setVendorListOpen] = useState(false);
+  // 거래내역 필터: 거래처 선택 목록 펼치기
+  const [txFilterListOpen, setTxFilterListOpen] = useState(false);
 
   // ── API helper ───────────────────────────────────────────
   async function apiFetch(path, opts = {}) {
@@ -774,12 +776,18 @@ export default function App() {
 
             {/* 필터 바 */}
             <div className="txFilterBar">
-              <select value={txFilterVendorId} onChange={e=>setTxFilterVendorId(e.target.value)}>
-                <option value="">📂 거래처별 그룹 보기 (전체 {groupedTxList.length}개 업체)</option>
-                {vendors.map(v => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
+              {(() => {
+                const picked = vendors.find(v => String(v.id) === String(txFilterVendorId));
+                return (
+                  <button className="btn txFilterPick" type="button"
+                    onClick={() => setTxFilterListOpen(o => !o)}>
+                    {txFilterVendorId
+                      ? <>🏷️ <b>{picked?.name || `#${txFilterVendorId}`}</b> 만 보기</>
+                      : <>📂 거래처별 그룹 보기 <span className="muted small">({groupedTxList.length}개 업체)</span></>}
+                    <span className="chev-s">{txFilterListOpen ? "▲" : "▼"}</span>
+                  </button>
+                );
+              })()}
               {!txFilterVendorId ? (
                 <>
                   <button className="btn small-btn" onClick={expandAllGroups}>＋ 모두 펼치기</button>
@@ -789,6 +797,39 @@ export default function App() {
                 <button className="btn small-btn" onClick={()=>setTxFilterVendorId("")}>← 그룹 보기로</button>
               )}
             </div>
+
+            {/* 거래처 선택 목록 (펼침) */}
+            {txFilterListOpen && (
+              <div className="vendorList txFilterList">
+                <div
+                  className={`vendorItem ${!txFilterVendorId?"on":""}`}
+                  onClick={() => { setTxFilterVendorId(""); setTxFilterListOpen(false); }}>
+                  <div className="vendorItemMain">
+                    <b>📂 거래처별 그룹 보기</b>
+                    <span className="muted small"> · 전체 {groupedTxList.length}개 업체 아코디언</span>
+                  </div>
+                </div>
+                {vendors.length === 0 && (
+                  <div className="muted small pad" style={{textAlign:"center"}}>
+                    등록된 거래처가 없습니다.
+                  </div>
+                )}
+                {vendors.map(v => {
+                  const isSel = String(v.id) === String(txFilterVendorId);
+                  const g = groupedTxList.find(gr => String(gr.vid) === String(v.id));
+                  return (
+                    <div key={v.id}
+                      className={`vendorItem ${isSel?"on":""}`}
+                      onClick={() => { setTxFilterVendorId(String(v.id)); setTxFilterListOpen(false); }}>
+                      <div className="vendorItemMain">
+                        <b>{v.name}</b>
+                        {g && <span className="muted small"> · {g.count}건 / 합계 {g.total.toLocaleString()}원</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* 전체(그룹) 모드 */}
             {!txFilterVendorId && (
@@ -1026,6 +1067,13 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
 /* 거래내역 필터 바 */
 .txFilterBar{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;}
 .txFilterBar select{max-width:380px;}
+.txFilterPick{
+  flex:1 1 auto;min-width:240px;max-width:440px;justify-content:space-between;
+  background:rgba(79,110,247,0.14);border-color:rgba(79,110,247,0.35);
+}
+.txFilterPick:hover{background:rgba(79,110,247,0.22);}
+.chev-s{font-size:10px;color:var(--muted);margin-left:auto;}
+.txFilterList{margin-top:8px;max-height:300px;}
 
 /* 거래처 목록(펼침) */
 .vendorList{
