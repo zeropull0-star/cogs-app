@@ -68,6 +68,8 @@ export default function App() {
   const [vendorListOpen, setVendorListOpen] = useState(false);
   // 거래내역 필터: 거래처 선택 목록 펼치기
   const [txFilterListOpen, setTxFilterListOpen] = useState(false);
+  // 거래내역 그룹 아코디언 가시성 (기본 숨김)
+  const [txGroupsVisible, setTxGroupsVisible] = useState(false);
 
   // ── API helper ───────────────────────────────────────────
   async function apiFetch(path, opts = {}) {
@@ -790,8 +792,16 @@ export default function App() {
               })()}
               {!txFilterVendorId ? (
                 <>
-                  <button className="btn small-btn" onClick={expandAllGroups}>＋ 모두 펼치기</button>
-                  <button className="btn small-btn" onClick={collapseAllGroups}>－ 모두 접기</button>
+                  <button className="btn small-btn"
+                    onClick={() => setTxGroupsVisible(v => !v)}>
+                    {txGroupsVisible ? "📕 목록 숨기기" : "📖 목록 보기"}
+                  </button>
+                  {txGroupsVisible && (
+                    <>
+                      <button className="btn small-btn" onClick={expandAllGroups}>＋ 모두 펼치기</button>
+                      <button className="btn small-btn" onClick={collapseAllGroups}>－ 모두 접기</button>
+                    </>
+                  )}
                 </>
               ) : (
                 <button className="btn small-btn" onClick={()=>setTxFilterVendorId("")}>← 그룹 보기로</button>
@@ -831,8 +841,17 @@ export default function App() {
               </div>
             )}
 
+            {/* 안내 (목록 숨김 상태) */}
+            {!txFilterVendorId && !txGroupsVisible && (
+              <div className="muted pad txHint" style={{textAlign:"center"}}>
+                거래처를 선택하거나 <b>📖 목록 보기</b> 를 눌러 전체 그룹을 펼쳐보세요.
+                <br/>
+                <span className="small">총 {groupedTxList.length}개 업체 · {txList.length.toLocaleString()}건</span>
+              </div>
+            )}
+
             {/* 전체(그룹) 모드 */}
-            {!txFilterVendorId && (
+            {!txFilterVendorId && txGroupsVisible && (
               <div className="txGroups">
                 {groupedTxList.length === 0 && (
                   <div className="muted pad" style={{textAlign:"center"}}>거래내역이 없습니다.</div>
@@ -1074,6 +1093,10 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
 .txFilterPick:hover{background:rgba(79,110,247,0.22);}
 .chev-s{font-size:10px;color:var(--muted);margin-left:auto;}
 .txFilterList{margin-top:8px;max-height:300px;}
+.txHint{
+  margin-top:14px;padding:24px 16px;border:1px dashed var(--border);
+  border-radius:12px;background:rgba(0,0,0,0.14);line-height:1.6;
+}
 
 /* 거래처 목록(펼침) */
 .vendorList{
