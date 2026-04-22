@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 const API_BASE  = "/api";
 const TOKEN_KEY = "token";
 const CO_KEY    = "selected_company_id";
+const PAID_KEY  = "paid_tx_ids";
 
 export default function App() {
   const initToken = (() => {
@@ -66,6 +67,24 @@ export default function App() {
   // 거래내역 정렬: "desc"=최신순, "asc"=오래된순
   const [txSortOrder, setTxSortOrder] = useState("desc");
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
+
+  // 매입 입금완료 체크 (localStorage 저장)
+  const [paidIds, setPaidIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem(PAID_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch { return new Set(); }
+  });
+  function togglePaid(txId) {
+    setPaidIds(prev => {
+      const n = new Set(prev);
+      const k = String(txId);
+      if (n.has(k)) n.delete(k); else n.add(k);
+      try { localStorage.setItem(PAID_KEY, JSON.stringify([...n])); } catch {}
+      return n;
+    });
+  }
 
   // 거래처 관리: 목록 펼치기 토글
   const [vendorListOpen, setVendorListOpen] = useState(false);
@@ -517,14 +536,31 @@ export default function App() {
       : "";
     const vname = tx.vendor_name ||
       vendors.find(x => String(x.id) === String(tx.vendor_id))?.name || String(tx.vendor_id);
+    const isBuy  = tx.kind === "매입";
+    const isPaid = isBuy && paidIds.has(String(tx.id));
+    const rowCo  = companies.find(c => String(c.id) === String(tx.company_id));
+    const rowCoColor = rowCo?.color || "#22c55e";
+    const rowStyle = isPaid
+      ? { background: rowCoColor+"2a", boxShadow: `inset 3px 0 0 ${rowCoColor}` }
+      : undefined;
     return (
-      <tr key={tx.id}>
+      <tr key={tx.id} className={isPaid?"txPaid":""} style={rowStyle}>
         <td>{tx.id}</td>
         <td><span className={`badge ${tx.kind==="매출"?"sale":"buy"}`}>{tx.kind}</span></td>
         {!hideVendor && <td className="ellipsis" title={vname}>{vname}</td>}
         <td className="num">{Number(tx.supply_amount||0).toLocaleString()}</td>
         <td className="num">{Number(tx.vat_amount||0).toLocaleString()}</td>
         <td className="num fw">{Number(tx.total_amount||0).toLocaleString()}</td>
+        <td className="paidCell">
+          {isBuy ? (
+            <label className="paidToggle" title={isPaid?"입금 완료됨 — 클릭해 해제":"입금 완료 체크"}
+              style={isPaid ? {background:rowCoColor+"55",borderColor:rowCoColor} : undefined}>
+              <input type="checkbox" checked={isPaid}
+                onChange={() => togglePaid(tx.id)} />
+              <span>{isPaid ? "✅ 완료" : "☐ 미입금"}</span>
+            </label>
+          ) : <span className="muted small">—</span>}
+        </td>
         <td className="nowrap">{when}</td>
         <td className="ellipsis" title={tx.doc_no||""}>{tx.doc_no||""}</td>
         <td className="btnCell">
@@ -1070,6 +1106,7 @@ export default function App() {
                               <tr>
                                 <th>ID</th><th>구분</th>
                                 <th>공급가</th><th>부가세</th><th className="fw">합계</th>
+                                <th>입금</th>
                                 <th>일시</th><th>문서번호</th>
                                 <th>PDF</th><th>Excel</th>
                                 <th>수정</th><th>삭제</th>
@@ -1095,6 +1132,7 @@ export default function App() {
                     <tr>
                       <th>ID</th><th>구분</th><th>거래처</th>
                       <th>공급가</th><th>부가세</th><th className="fw">합계</th>
+                      <th>입금</th>
                       <th>일시</th><th>문서번호</th>
                       <th>PDF</th><th>Excel</th>
                       <th>수정</th><th>삭제</th>
@@ -1103,7 +1141,7 @@ export default function App() {
                   <tbody>
                     {filteredTxList.map(tx => renderTxRow(tx, false))}
                     {filteredTxList.length === 0 && (
-                      <tr><td colSpan={12} className="muted pad" style={{textAlign:"center"}}>
+                      <tr><td colSpan={13} className="muted pad" style={{textAlign:"center"}}>
                         선택한 거래처의 거래내역이 없습니다.
                       </td></tr>
                     )}
@@ -1322,6 +1360,21 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
 /* 거래내역 정렬 토글 */
 .txSortToggle{display:inline-flex;gap:4px;align-items:center;margin-left:auto;}
 .txSortToggle .chip{height:28px;}
+
+/* 매입 입금완료 체크 */
+.paidCell{white-space:nowrap;}
+.paidToggle{
+  display:inline-flex;align-items:center;gap:4px;cursor:pointer;
+  padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700;
+  border:1px solid var(--border);background:rgba(255,255,255,0.04);
+  transition:background .12s,border-color .12s;user-select:none;
+}
+.paidToggle input{
+  width:auto;height:auto;margin:0;accent-color:#22c55e;cursor:pointer;
+}
+.paidToggle:hover{background:rgba(255,255,255,0.08);}
+.txPaid td{color:var(--text);}
+.txPaid td.num,.txPaid td.fw{font-weight:700;}
 
 /* 거래처 목록(펼침) */
 .vendorList{
