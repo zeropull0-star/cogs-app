@@ -53,7 +53,6 @@ export default function App() {
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
   });
   const [docNo, setDocNo]     = useState("");
-  const [docNoManual, setDocNoManual] = useState(false);
   const [memo, setMemo]       = useState("");
   const [items, setItems]     = useState([{ name:"", spec:"", qty:1, unit_price:0 }]);
   const [txList, setTxList]     = useState([]);
@@ -70,6 +69,10 @@ export default function App() {
   const [txFilterListOpen, setTxFilterListOpen] = useState(false);
   // 거래내역 그룹 아코디언 가시성 (기본 숨김)
   const [txGroupsVisible, setTxGroupsVisible] = useState(false);
+  // 거래 등록 - 거래처 검색 (거래내역까지 연동 필터)
+  const [txVendorQuery, setTxVendorQuery] = useState("");
+  // PDF 드래그앤드랍 상태
+  const [pdfDragActive, setPdfDragActive] = useState(false);
 
   // ── API helper ───────────────────────────────────────────
   async function apiFetch(path, opts = {}) {
@@ -170,16 +173,7 @@ export default function App() {
     [companies, selectedCoId]
   );
 
-  // 발행회사 변경 시 → 수동 입력 중이 아니면 문서번호 미리보기 자동 갱신
-  useEffect(() => {
-    if (docNoManual) return; // 사용자가 직접 입력 중이면 건드리지 않음
-    if (!selectedCo) { setDocNo(""); return; }
-    const prefix = (selectedCo.doc_prefix || "").trim() || "BWIS";
-    const d = new Date();
-    const pad = n => String(n).padStart(2, "0");
-    const dateStr = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`;
-    setDocNo(`${prefix}-${dateStr}-????`);
-  }, [selectedCoId, selectedCo, docNoManual]);
+  // 문서번호: 비워두면 저장 시 백엔드가 발행회사 prefix 기준 자동 생성
 
   function beginEditCo(co) {
     setEditingCoId(co.id); setCoName(co.name || ""); setCoBizNo(co.biz_no || "");
@@ -294,7 +288,7 @@ export default function App() {
     const d = new Date(tx.tx_date);
     const p = n => String(n).padStart(2, "0");
     setTxDate(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`);
-    setDocNo(tx.doc_no || ""); setDocNoManual(true);
+    setDocNo(tx.doc_no || "");
     setMemo(tx.description || "");
     setItems(tx.items && tx.items.length
       ? tx.items.map(it => ({ name: it.name, spec: it.spec || "", qty: it.qty, unit_price: it.unit_price }))
@@ -304,7 +298,7 @@ export default function App() {
 
   function cancelEditTx() {
     setEditingTxId(null);
-    setMemo(""); setDocNo(""); setDocNoManual(false);
+    setMemo(""); setDocNo("");
     setItems([{ name:"", spec:"", qty:1, unit_price:0 }]);
   }
 
@@ -315,8 +309,7 @@ export default function App() {
       .map(it => ({ name: it.name.trim(), spec: (it.spec||"").trim() || null,
                     qty: Number(it.qty||0), unit_price: Number(it.unit_price||0) }));
     if (!cleanItems.length) { alert("품목을 1개 이상 입력하세요."); return; }
-    // ????가 포함된 미리보기 값은 자동생성으로 처리
-    const finalDocNo = (docNo.trim() && !docNo.includes("????")) ? docNo.trim() : null;
+    const finalDocNo = docNo.trim() || null;
     const body = JSON.stringify({ kind: txKind, vendor_id: Number(selectedVendorId),
       company_id: selectedCoId ? Number(selectedCoId) : null,
       tx_date: new Date(txDate).toISOString(), description: memo.trim() || null,
@@ -419,10 +412,27 @@ export default function App() {
   }
 
   // ── 거래내역 그룹핑/필터 ─────────────────────────────────
+  const txVendorQueryNorm = (txVendorQuery || "").trim().toLowerCase();
+
+  // 거래 등록 vendor select & 거래내역 그룹에 공통 적용되는 필터된 거래처
+  const txFormFilteredVendors = useMemo(() => {
+    if (!txVendorQueryNorm) return vendors;
+    return vendors.filter(v =>
+      `${v.name} ${v.biz_no || ""} ${v.ceo || ""} ${v.phone || ""} ${v.addr || ""}`
+        .toLowerCase().includes(txVendorQueryNorm));
+  }, [vendors, txVendorQueryNorm]);
+
   const filteredTxList = useMemo(() => {
-    if (!txFilterVendorId) return txList;
-    return txList.filter(t => String(t.vendor_id) === String(txFilterVendorId));
-  }, [txList, txFilterVendorId]);
+    let arr = txList;
+    if (txFilterVendorId) {
+      arr = arr.filter(t => String(t.vendor_id) === String(txFilterVendorId));
+    }
+    if (txVendorQueryNorm) {
+      const allowed = new Set(txFormFilteredVendors.map(v => String(v.id)));
+      arr = arr.filter(t => allowed.has(String(t.vendor_id)));
+    }
+    return arr;
+  }, [txList, txFilterVendorId, txVendorQueryNorm, txFormFilteredVendors]);
 
   const groupedTxList = useMemo(() => {
     const map = new Map();
@@ -431,8 +441,12 @@ export default function App() {
       if (!map.has(k)) map.set(k, []);
       map.get(k).push(tx);
     }
+    const allowedIds = txVendorQueryNorm
+      ? new Set(txFormFilteredVendors.map(v => String(v.id)))
+      : null;
     const out = [];
     for (const [vid, arr] of map) {
+      if (allowedIds && !allowedIds.has(vid)) continue;
       const vname = arr[0]?.vendor_name ||
         vendors.find(v => String(v.id) === vid)?.name || `#${vid}`;
       const supply = arr.reduce((s,t) => s + Number(t.supply_amount||0), 0);
@@ -448,7 +462,7 @@ export default function App() {
     }
     out.sort((a,b) => a.vname.localeCompare(b.vname, "ko"));
     return out;
-  }, [txList, vendors]);
+  }, [txList, vendors, txVendorQueryNorm, txFormFilteredVendors]);
 
   function toggleGroup(vid) {
     setExpandedGroups(prev => {
@@ -705,14 +719,29 @@ export default function App() {
             <div className="h">
               {editingTxId ? <span>✏️ 거래 수정 <span className="co-info-item">TX #{editingTxId}</span></span> : "거래 등록"}
             </div>
-            <div className="row">
+            <div className="row txVendorSearchRow">
+              <input value={txVendorQuery}
+                onChange={e => setTxVendorQuery(e.target.value)}
+                placeholder="🔎 거래처 검색 (이름/사업자번호/대표자) — 거래내역도 함께 필터됩니다"
+                style={{flex:"1 1 auto"}} />
+              {txVendorQuery && (
+                <button className="btn small-btn" type="button"
+                  onClick={() => setTxVendorQuery("")}>✕ 초기화</button>
+              )}
+              {txVendorQuery && (
+                <span className="muted small">
+                  {txFormFilteredVendors.length}개 일치
+                </span>
+              )}
+            </div>
+            <div className="row" style={{marginTop:8}}>
               <select value={txKind} onChange={e => setTxKind(e.target.value)}>
                 <option value="매출">매출</option>
                 <option value="매입">매입</option>
               </select>
               <select value={selectedVendorId} onChange={e => setSelectedVendorId(e.target.value)}>
                 <option value="">거래처 선택</option>
-                {filteredVendors.map(v => (
+                {txFormFilteredVendors.map(v => (
                   <option key={v.id} value={v.id}>{v.name}</option>
                 ))}
               </select>
@@ -732,11 +761,7 @@ export default function App() {
               </button>
             </div>
             <div className="row" style={{marginTop:10}}>
-              <input value={docNo} onChange={e => {
-                  const v = e.target.value;
-                  setDocNo(v);
-                  setDocNoManual(v.length > 0); // 비우면 자동모드 복귀
-                }}
+              <input value={docNo} onChange={e => setDocNo(e.target.value)}
                 placeholder="문서번호 (비우면 발행회사 기준 자동 생성)" />
             </div>
             <textarea value={memo} onChange={e => setMemo(e.target.value)}
@@ -753,6 +778,20 @@ export default function App() {
                     e.target.value = "";
                   }} />
               </label>
+            </div>
+            <div
+              className={`pdfDropZone ${pdfDragActive?"dragOn":""}`}
+              onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setPdfDragActive(true); }}
+              onDragOver={e => { e.preventDefault(); e.stopPropagation(); setPdfDragActive(true); }}
+              onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setPdfDragActive(false); }}
+              onDrop={e => {
+                e.preventDefault(); e.stopPropagation(); setPdfDragActive(false);
+                const f = e.dataTransfer.files?.[0];
+                if (f) importItemsFromPdf(f);
+              }}>
+              {pdfDragActive
+                ? "📥 여기에 놓으면 PDF를 스캔합니다"
+                : "📎 또는 이 영역에 PDF를 드래그&드롭 하세요"}
             </div>
             <div className="items">
               {items.map((it, idx) => (
@@ -1150,6 +1189,20 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
   background:rgba(22,163,74,0.2);border-color:rgba(22,163,74,0.45);
 }
 .pdfImportBtn:hover{background:rgba(22,163,74,0.4);}
+.pdfDropZone{
+  margin:4px 0 10px;padding:14px 16px;border:2px dashed rgba(22,163,74,0.4);
+  border-radius:12px;background:rgba(22,163,74,0.06);
+  text-align:center;font-size:12px;color:var(--muted);
+  transition:background .15s,border-color .15s,color .15s;
+}
+.pdfDropZone.dragOn{
+  background:rgba(22,163,74,0.22);border-color:rgba(22,163,74,0.9);
+  color:var(--text);font-weight:700;
+}
+
+/* 거래 등록 거래처 검색 행 */
+.txVendorSearchRow{align-items:center;gap:8px;}
+.txVendorSearchRow>input{flex:1 1 auto;}
 
 /* 거래처 목록(펼침) */
 .vendorList{
