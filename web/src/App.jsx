@@ -61,6 +61,8 @@ export default function App() {
 
   // 거래내역 뷰: ""=거래처별 그룹화, 특정 ID=해당 거래처 flat 테이블
   const [txFilterVendorId, setTxFilterVendorId] = useState("");
+  // 거래내역 발행회사 필터: ""=전체, "none"=회사없음, 특정 ID=해당 회사
+  const [txFilterCompanyId, setTxFilterCompanyId] = useState("");
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
 
   // 거래처 관리: 목록 펼치기 토글
@@ -422,6 +424,12 @@ export default function App() {
         .toLowerCase().includes(txVendorQueryNorm));
   }, [vendors, txVendorQueryNorm]);
 
+  function matchCompany(tx) {
+    if (!txFilterCompanyId) return true;
+    if (txFilterCompanyId === "none") return !tx.company_id;
+    return String(tx.company_id) === String(txFilterCompanyId);
+  }
+
   const filteredTxList = useMemo(() => {
     let arr = txList;
     if (txFilterVendorId) {
@@ -431,12 +439,17 @@ export default function App() {
       const allowed = new Set(txFormFilteredVendors.map(v => String(v.id)));
       arr = arr.filter(t => allowed.has(String(t.vendor_id)));
     }
+    if (txFilterCompanyId) {
+      arr = arr.filter(matchCompany);
+    }
     return arr;
-  }, [txList, txFilterVendorId, txVendorQueryNorm, txFormFilteredVendors]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txList, txFilterVendorId, txVendorQueryNorm, txFormFilteredVendors, txFilterCompanyId]);
 
   const groupedTxList = useMemo(() => {
     const map = new Map();
     for (const tx of txList) {
+      if (!matchCompany(tx)) continue;
       const k = String(tx.vendor_id);
       if (!map.has(k)) map.set(k, []);
       map.get(k).push(tx);
@@ -462,7 +475,20 @@ export default function App() {
     }
     out.sort((a,b) => a.vname.localeCompare(b.vname, "ko"));
     return out;
-  }, [txList, vendors, txVendorQueryNorm, txFormFilteredVendors]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txList, vendors, txVendorQueryNorm, txFormFilteredVendors, txFilterCompanyId]);
+
+  // 회사별 거래 건수 (필터 chip 표시용) — vendor query / vendor filter 와 무관하게 전체 집계
+  const companyTxCounts = useMemo(() => {
+    const m = new Map();
+    let noneCount = 0;
+    for (const tx of txList) {
+      if (!tx.company_id) { noneCount++; continue; }
+      const k = String(tx.company_id);
+      m.set(k, (m.get(k) || 0) + 1);
+    }
+    return { map: m, none: noneCount };
+  }, [txList]);
 
   function toggleGroup(vid) {
     setExpandedGroups(prev => {
@@ -507,10 +533,26 @@ export default function App() {
         <td><button className="btn xsBtn" onClick={()=>beginEditTx(tx)}>✏️</button>
           {(() => {
             const co = companies.find(c => String(c.id) === String(tx.company_id));
-            if (!co) return null;
+            if (!co) {
+              return (
+                <span className="coBadge coBadgeNone"
+                  title="발행회사 미지정 — 클릭하면 미지정 건만 필터"
+                  onClick={() => setTxFilterCompanyId("none")}>
+                  ?
+                </span>
+              );
+            }
             const color = co.color || "#2563eb";
             const short = co.name.replace(/\(주\)|주식회사|\(|\)/g,"").trim().slice(0,2);
-            return <span style={{marginLeft:4,display:"inline-block",padding:"2px 6px",borderRadius:"999px",fontSize:"11px",fontWeight:700,background:color+"22",color,border:`1px solid ${color}55`}}>{short}</span>;
+            const isActive = String(txFilterCompanyId) === String(co.id);
+            return (
+              <span className={`coBadge ${isActive?"coBadgeActive":""}`}
+                title={`${co.name} — 클릭하면 이 회사 거래만 필터`}
+                style={{background:color+(isActive?"55":"22"),color,border:`1px solid ${color}${isActive?"aa":"55"}`}}
+                onClick={() => setTxFilterCompanyId(isActive ? "" : String(co.id))}>
+                {short}
+              </span>
+            );
           })()}
         </td>
         <td><button className="btn danger xsBtn" onClick={()=>deleteTx(tx.id)}>삭제</button></td>
@@ -860,6 +902,41 @@ export default function App() {
               {selectedCo && <span className="co-badge">발행 회사: {selectedCo.name}</span>}
             </div>
 
+            {/* 발행회사 필터 chip 바 */}
+            <div className="txCoFilterBar">
+              <span className="muted small txCoFilterLabel">🏢 발행회사별:</span>
+              <button type="button"
+                className={`btn chip ${!txFilterCompanyId?"chip-on":""}`}
+                onClick={() => setTxFilterCompanyId("")}>
+                전체 ({txList.length})
+              </button>
+              {companies.map(co => {
+                const n = companyTxCounts.map.get(String(co.id)) || 0;
+                const isOn = String(txFilterCompanyId) === String(co.id);
+                const color = co.color || "#2563eb";
+                return (
+                  <button key={co.id} type="button"
+                    className={`btn chip coChip ${isOn?"chip-on":""}`}
+                    style={{
+                      background: isOn ? color+"cc" : color+"26",
+                      borderColor: color+"77",
+                      color: isOn ? "#fff" : undefined,
+                    }}
+                    onClick={() => setTxFilterCompanyId(isOn ? "" : String(co.id))}>
+                    {co.name} ({n})
+                  </button>
+                );
+              })}
+              {companyTxCounts.none > 0 && (
+                <button type="button"
+                  className={`btn chip ${txFilterCompanyId==="none"?"chip-on":""}`}
+                  onClick={() => setTxFilterCompanyId(txFilterCompanyId==="none"?"":"none")}
+                  title="발행회사가 지정되지 않은 거래">
+                  미지정 ({companyTxCounts.none})
+                </button>
+              )}
+            </div>
+
             {/* 필터 바 */}
             <div className="txFilterBar">
               {(() => {
@@ -1203,6 +1280,26 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
 /* 거래 등록 거래처 검색 행 */
 .txVendorSearchRow{align-items:center;gap:8px;}
 .txVendorSearchRow>input{flex:1 1 auto;}
+
+/* 발행회사 필터 chip 바 */
+.txCoFilterBar{
+  display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;
+  padding:8px 10px;border:1px solid var(--border);border-radius:10px;
+  background:rgba(0,0,0,0.14);
+}
+.txCoFilterLabel{flex:0 0 auto;font-weight:700;}
+.coChip{font-weight:600;}
+.coChip:hover{filter:brightness(1.15);}
+
+/* 거래 행 내 클릭 가능한 발행회사 뱃지 */
+.coBadge{
+  margin-left:4px;display:inline-block;padding:2px 6px;border-radius:999px;
+  font-size:11px;font-weight:700;cursor:pointer;user-select:none;
+  transition:filter .12s,box-shadow .12s;
+}
+.coBadge:hover{filter:brightness(1.2);box-shadow:0 0 0 2px rgba(255,255,255,0.12);}
+.coBadgeActive{box-shadow:0 0 0 2px rgba(255,255,255,0.35);}
+.coBadgeNone{background:rgba(255,255,255,0.08);color:var(--muted);border:1px dashed var(--border);}
 
 /* 거래처 목록(펼침) */
 .vendorList{
