@@ -392,9 +392,11 @@ export default function App() {
   }
 
   // ── 문서 다운로드 ────────────────────────────────────────
-  async function downloadDoc(txId, docTypeKo, ext, filename) {
-    if (!selectedCoId) { alert("먼저 발행 회사를 선택하세요."); return; }
-    const path = `/tx/${txId}/${ext}?doc_type=${encodeURIComponent(docTypeKo)}&company_id=${selectedCoId}`;
+  // companyId: 거래 저장 시 기록된 발행회사를 우선. 없으면 현재 선택된 회사로 폴백.
+  async function downloadDoc(txId, docTypeKo, ext, filename, companyId) {
+    const coId = companyId || selectedCoId;
+    if (!coId) { alert("먼저 발행 회사를 선택하세요."); return; }
+    const path = `/tx/${txId}/${ext}?doc_type=${encodeURIComponent(docTypeKo)}&company_id=${coId}`;
     const res  = await apiFetch(path);
     if (!res.ok) { alert(`다운로드 실패: ${await res.text()}`); return; }
     const blob   = await res.blob();
@@ -566,13 +568,13 @@ export default function App() {
         <td className="btnCell">
           {[["견적서","견적서"],["발주서","발주서"],["거래명세서","명세서"]].map(([k,l])=>(
             <button key={k} className="btn pdf-btn xsBtn"
-              onClick={()=>downloadDoc(tx.id,k,"pdf",`${l}_TX${tx.id}.pdf`)}>📄{l}</button>
+              onClick={()=>downloadDoc(tx.id,k,"pdf",`${l}_TX${tx.id}.pdf`,tx.company_id)}>📄{l}</button>
           ))}
         </td>
         <td className="btnCell">
           {[["견적서","견적서"],["발주서","발주서"],["거래명세서","명세서"]].map(([k,l])=>(
             <button key={k} className="btn excel-btn xsBtn"
-              onClick={()=>downloadDoc(tx.id,k,"excel",`${l}_TX${tx.id}.xlsx`)}>📊{l}</button>
+              onClick={()=>downloadDoc(tx.id,k,"excel",`${l}_TX${tx.id}.xlsx`,tx.company_id)}>📊{l}</button>
           ))}
         </td>
         <td><button className="btn xsBtn" onClick={()=>beginEditTx(tx)}>✏️</button>
