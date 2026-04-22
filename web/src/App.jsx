@@ -63,6 +63,8 @@ export default function App() {
   const [txFilterVendorId, setTxFilterVendorId] = useState("");
   // 거래내역 발행회사 필터: ""=전체, "none"=회사없음, 특정 ID=해당 회사
   const [txFilterCompanyId, setTxFilterCompanyId] = useState("");
+  // 거래내역 정렬: "desc"=최신순, "asc"=오래된순
+  const [txSortOrder, setTxSortOrder] = useState("desc");
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
 
   // 거래처 관리: 목록 펼치기 토글
@@ -442,9 +444,14 @@ export default function App() {
     if (txFilterCompanyId) {
       arr = arr.filter(matchCompany);
     }
-    return arr;
+    const sorted = [...arr].sort((a,b) => {
+      const ta = new Date(a.tx_date).getTime();
+      const tb = new Date(b.tx_date).getTime();
+      return txSortOrder === "asc" ? ta - tb : tb - ta;
+    });
+    return sorted;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [txList, txFilterVendorId, txVendorQueryNorm, txFormFilteredVendors, txFilterCompanyId]);
+  }, [txList, txFilterVendorId, txVendorQueryNorm, txFormFilteredVendors, txFilterCompanyId, txSortOrder]);
 
   const groupedTxList = useMemo(() => {
     const map = new Map();
@@ -467,16 +474,18 @@ export default function App() {
       const total  = arr.reduce((s,t) => s + Number(t.total_amount||0),  0);
       const saleCount = arr.filter(t => t.kind === "매출").length;
       const buyCount  = arr.filter(t => t.kind === "매입").length;
-      const items = [...arr].sort(
-        (a,b) => new Date(b.tx_date).getTime() - new Date(a.tx_date).getTime()
-      );
+      const items = [...arr].sort((a,b) => {
+        const ta = new Date(a.tx_date).getTime();
+        const tb = new Date(b.tx_date).getTime();
+        return txSortOrder === "asc" ? ta - tb : tb - ta;
+      });
       out.push({ vid, vname, items, count: arr.length,
                  supply, vat, total, saleCount, buyCount });
     }
     out.sort((a,b) => a.vname.localeCompare(b.vname, "ko"));
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [txList, vendors, txVendorQueryNorm, txFormFilteredVendors, txFilterCompanyId]);
+  }, [txList, vendors, txVendorQueryNorm, txFormFilteredVendors, txFilterCompanyId, txSortOrder]);
 
   // 회사별 거래 건수 (필터 chip 표시용) — vendor query / vendor filter 와 무관하게 전체 집계
   const companyTxCounts = useMemo(() => {
@@ -967,6 +976,15 @@ export default function App() {
               ) : (
                 <button className="btn small-btn" onClick={()=>setTxFilterVendorId("")}>← 그룹 보기로</button>
               )}
+              <span className="txSortToggle">
+                <span className="muted small">정렬</span>
+                <button type="button"
+                  className={`btn chip ${txSortOrder==="desc"?"chip-on":""}`}
+                  onClick={() => setTxSortOrder("desc")}>⬇ 최신순</button>
+                <button type="button"
+                  className={`btn chip ${txSortOrder==="asc"?"chip-on":""}`}
+                  onClick={() => setTxSortOrder("asc")}>⬆ 오래된순</button>
+              </span>
             </div>
 
             {/* 거래처 선택 목록 (펼침) */}
@@ -1300,6 +1318,10 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
 .coBadge:hover{filter:brightness(1.2);box-shadow:0 0 0 2px rgba(255,255,255,0.12);}
 .coBadgeActive{box-shadow:0 0 0 2px rgba(255,255,255,0.35);}
 .coBadgeNone{background:rgba(255,255,255,0.08);color:var(--muted);border:1px dashed var(--border);}
+
+/* 거래내역 정렬 토글 */
+.txSortToggle{display:inline-flex;gap:4px;align-items:center;margin-left:auto;}
+.txSortToggle .chip{height:28px;}
 
 /* 거래처 목록(펼침) */
 .vendorList{
