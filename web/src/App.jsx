@@ -58,6 +58,8 @@ export default function App() {
   const [items, setItems]     = useState([{ name:"", spec:"", qty:1, unit_price:0 }]);
   const [txList, setTxList]     = useState([]);
   const [editingTxId, setEditingTxId] = useState(null);
+  // 폼 내 발행회사 (신규는 상단 selectedCo 기본, 수정 시 해당 tx.company_id 로드)
+  const [txCoId, setTxCoId] = useState("");
   const [statsText, setStatsText] = useState("");
 
   // 거래내역 뷰: ""=거래처별 그룹화, 특정 ID=해당 거래처 flat 테이블
@@ -308,6 +310,7 @@ export default function App() {
     setEditingTxId(tx.id);
     setTxKind(tx.kind);
     setSelectedVendorId(String(tx.vendor_id));
+    setTxCoId(tx.company_id ? String(tx.company_id) : "");
     const d = new Date(tx.tx_date);
     const p = n => String(n).padStart(2, "0");
     setTxDate(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`);
@@ -322,6 +325,7 @@ export default function App() {
   function cancelEditTx() {
     setEditingTxId(null);
     setMemo(""); setDocNo("");
+    setTxCoId("");
     setItems([{ name:"", spec:"", qty:1, unit_price:0 }]);
   }
 
@@ -333,8 +337,10 @@ export default function App() {
                     qty: Number(it.qty||0), unit_price: Number(it.unit_price||0) }));
     if (!cleanItems.length) { alert("품목을 1개 이상 입력하세요."); return; }
     const finalDocNo = docNo.trim() || null;
+    // 폼 내 지정값 우선, 없으면 상단 발행회사 선택값
+    const effectiveCoId = txCoId || selectedCoId;
     const body = JSON.stringify({ kind: txKind, vendor_id: Number(selectedVendorId),
-      company_id: selectedCoId ? Number(selectedCoId) : null,
+      company_id: effectiveCoId ? Number(effectiveCoId) : null,
       tx_date: new Date(txDate).toISOString(), description: memo.trim() || null,
       vat_rate: 0.1, vat_included: vatIncluded,
       doc_no: finalDocNo, items: cleanItems });
@@ -687,11 +693,30 @@ export default function App() {
                   <input value={coPhone}  onChange={e=>setCoPhone(e.target.value)}  placeholder="연락처" />
                   <input value={coLogo}   onChange={e=>setCoLogo(e.target.value)}   placeholder="로고 이미지 경로 (서버 절대경로)" />
                   <input value={coSeal}   onChange={e=>setCoSeal(e.target.value)}   placeholder="직인 이미지 경로 (서버 절대경로)" />
-                  <div className="row" style={{alignItems:"center",gap:10}}>
+                  <div className="row" style={{alignItems:"center",gap:10,flexWrap:"wrap"}}>
                     <label style={{fontSize:12,color:"var(--muted)"}}>대표 색상</label>
                     <input type="color" value={coColor} onChange={e=>setCoColor(e.target.value)}
                       style={{width:40,height:30,padding:2,border:"1px solid var(--border)",borderRadius:6,cursor:"pointer"}} />
                     <span style={{fontSize:12,color:"var(--muted)"}}>{coColor}</span>
+                  </div>
+                  <div className="colorPresetRow">
+                    <span className="muted small">프리셋:</span>
+                    {[
+                      ["#3b82f6","블루"],["#ef4444","레드"],["#f97316","오렌지"],
+                      ["#22c55e","그린"],["#a855f7","퍼플"],["#ec4899","핑크"],
+                      ["#14b8a6","틸"],["#eab308","옐로"],["#64748b","슬레이트"],
+                    ].map(([hex,label]) => {
+                      const on = coColor.toLowerCase() === hex;
+                      return (
+                        <button key={hex} type="button"
+                          className={`colorSwatch ${on?"on":""}`}
+                          title={`${label} ${hex}`}
+                          style={{background:hex}}
+                          onClick={() => setCoColor(hex)}>
+                          {on ? "✓" : ""}
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className="row">
                     <button className="btn primary" onClick={saveCo}>{editingCoId ? "수정 저장" : "추가"}</button>
@@ -848,6 +873,31 @@ export default function App() {
                 onClick={() => setVatIncluded(true)}>
                 포함 (단가에 10% 포함)
               </button>
+            </div>
+            <div className="row txCoPickerRow" style={{marginTop:8}}>
+              <span className="muted small">발행회사</span>
+              <button type="button"
+                className={`btn chip ${!txCoId?"chip-on":""}`}
+                onClick={() => setTxCoId("")}
+                title={editingTxId ? "미지정 (저장 시 상단 선택 회사 사용)" : "상단 발행회사 선택값 사용"}>
+                {editingTxId ? "미지정" : "상단 선택값"}
+              </button>
+              {companies.map(co => {
+                const on = String(txCoId) === String(co.id);
+                const color = co.color || "#2563eb";
+                return (
+                  <button key={co.id} type="button"
+                    className={`btn chip coChip ${on?"chip-on":""}`}
+                    style={{
+                      background: on ? color+"cc" : color+"26",
+                      borderColor: color+"77",
+                      color: on ? "#fff" : undefined,
+                    }}
+                    onClick={() => setTxCoId(String(co.id))}>
+                    {co.name}
+                  </button>
+                );
+              })}
             </div>
             <div className="row" style={{marginTop:10}}>
               <input value={docNo} onChange={e => setDocNo(e.target.value)}
@@ -1362,6 +1412,22 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
 /* 거래내역 정렬 토글 */
 .txSortToggle{display:inline-flex;gap:4px;align-items:center;margin-left:auto;}
 .txSortToggle .chip{height:28px;}
+
+/* 거래 폼 발행회사 chip 선택 */
+.txCoPickerRow{align-items:center;gap:6px;flex-wrap:wrap;}
+
+/* 회사 색상 프리셋 */
+.colorPresetRow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;
+  grid-column:1/-1;padding:6px 0;}
+.colorSwatch{
+  width:26px;height:26px;border-radius:50%;
+  border:2px solid rgba(255,255,255,0.18);cursor:pointer;
+  color:#fff;font-weight:700;font-size:12px;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:transform .08s,box-shadow .12s;padding:0;
+}
+.colorSwatch:hover{transform:scale(1.1);}
+.colorSwatch.on{border-color:#fff;box-shadow:0 0 0 2px rgba(79,110,247,0.6);}
 
 /* 매입 입금완료 체크 */
 .paidCell{white-space:nowrap;}
