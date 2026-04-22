@@ -339,6 +339,10 @@ export default function App() {
     const finalDocNo = docNo.trim() || null;
     // 폼 내 지정값 우선, 없으면 상단 발행회사 선택값
     const effectiveCoId = txCoId || selectedCoId;
+    if (!effectiveCoId) {
+      alert("발행회사를 선택하세요. (상단 발행회사 선택 또는 거래 폼의 발행회사 chip)");
+      return;
+    }
     const body = JSON.stringify({ kind: txKind, vendor_id: Number(selectedVendorId),
       company_id: effectiveCoId ? Number(effectiveCoId) : null,
       tx_date: new Date(txDate).toISOString(), description: memo.trim() || null,
@@ -501,13 +505,22 @@ export default function App() {
       const total  = arr.reduce((s,t) => s + Number(t.total_amount||0),  0);
       const saleCount = arr.filter(t => t.kind === "매출").length;
       const buyCount  = arr.filter(t => t.kind === "매입").length;
+      // 회사별 분포
+      const coBreakdown = new Map();
+      let noneBreakdown = 0;
+      for (const t of arr) {
+        if (!t.company_id) { noneBreakdown++; continue; }
+        const k = String(t.company_id);
+        coBreakdown.set(k, (coBreakdown.get(k) || 0) + 1);
+      }
       const items = [...arr].sort((a,b) => {
         const ta = new Date(a.tx_date).getTime();
         const tb = new Date(b.tx_date).getTime();
         return txSortOrder === "asc" ? ta - tb : tb - ta;
       });
       out.push({ vid, vname, items, count: arr.length,
-                 supply, vat, total, saleCount, buyCount });
+                 supply, vat, total, saleCount, buyCount,
+                 coBreakdown, noneBreakdown });
     }
     out.sort((a,b) => a.vname.localeCompare(b.vname, "ko"));
     return out;
@@ -1134,6 +1147,30 @@ export default function App() {
                           <span className="pill">{g.count}건</span>
                           {g.saleCount>0 && <span className="pill pill-sale">매출 {g.saleCount}</span>}
                           {g.buyCount>0  && <span className="pill pill-buy">매입 {g.buyCount}</span>}
+                          {[...g.coBreakdown.entries()].map(([cid, n]) => {
+                            const co = companies.find(c => String(c.id) === cid);
+                            if (!co) return null;
+                            const color = co.color || "#2563eb";
+                            const on = String(txFilterCompanyId) === cid;
+                            return (
+                              <span key={cid}
+                                className={`pill pill-co ${on?"on":""}`}
+                                style={{background:color+(on?"55":"22"),color,borderColor:color+(on?"aa":"55")}}
+                                onClick={e => { e.stopPropagation();
+                                  setTxFilterCompanyId(on ? "" : cid); }}
+                                title={`${co.name} ${n}건 — 클릭해 필터`}>
+                                {co.name} {n}
+                              </span>
+                            );
+                          })}
+                          {g.noneBreakdown > 0 && (
+                            <span className="pill pill-co-none"
+                              onClick={e => { e.stopPropagation();
+                                setTxFilterCompanyId(txFilterCompanyId==="none"?"":"none"); }}
+                              title="회사 미지정 — 클릭해 필터">
+                              미지정 {g.noneBreakdown}
+                            </span>
+                          )}
                         </span>
                         <span className="gSum">
                           공급가 <b>{g.supply.toLocaleString()}</b> ·
@@ -1513,6 +1550,11 @@ input:focus,select:focus,textarea:focus{border-color:rgba(79,110,247,0.6);}
 }
 .pill-sale{background:rgba(79,110,247,0.2);color:#93c5fd;border-color:rgba(79,110,247,0.4);}
 .pill-buy{background:rgba(226,77,77,0.18);color:#fca5a5;border-color:rgba(226,77,77,0.4);}
+.pill-co{cursor:pointer;transition:filter .12s,box-shadow .12s;}
+.pill-co:hover{filter:brightness(1.2);box-shadow:0 0 0 2px rgba(255,255,255,0.08);}
+.pill-co.on{box-shadow:0 0 0 2px rgba(255,255,255,0.35);}
+.pill-co-none{cursor:pointer;background:rgba(255,255,255,0.06);color:var(--muted);border:1px dashed var(--border);}
+.pill-co-none:hover{background:rgba(255,255,255,0.12);}
 .gSum{
   margin-left:auto;font-size:12px;color:var(--muted);
   font-variant-numeric:tabular-nums;
