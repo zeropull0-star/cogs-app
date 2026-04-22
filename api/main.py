@@ -1281,7 +1281,17 @@ def update_tx(tx_id: int, payload: TxIn, user: User = Depends(get_current_user))
         t.kind=payload.kind; t.tx_date=tx_date; t.vendor_id=payload.vendor_id
         t.description=payload.description; t.vat_rate=payload.vat_rate
         t.supply_amount=supply; t.vat_amount=vat; t.total_amount=tot
-        if (payload.doc_no or "").strip(): t.doc_no = payload.doc_no.strip()
+        # 발행회사 업데이트(미지정 → 지정, 변경, 해제 모두 반영)
+        t.company_id = payload.company_id
+        # 문서번호: 입력값이 있으면 그대로, 비우면 발행회사 prefix 기준 자동 재생성
+        new_doc = (payload.doc_no or "").strip()
+        if new_doc:
+            t.doc_no = new_doc
+        else:
+            company = (db.query(Company).filter(Company.id == payload.company_id).first()
+                       if payload.company_id else None)
+            prefix = (company.doc_prefix or "").strip() if company else None
+            t.doc_no = f"{_gen_doc_no(tx_date, prefix)}-{t.id:04d}"
         db.query(TxItem).filter(TxItem.tx_id == tx_id).delete()
         for it in payload.items:
             db.add(TxItem(tx_id=tx_id, name=it.name,
