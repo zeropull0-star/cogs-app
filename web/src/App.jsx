@@ -61,6 +61,7 @@ export default function App() {
   // 폼 내 발행회사 (신규는 상단 selectedCo 기본, 수정 시 해당 tx.company_id 로드)
   const [txCoId, setTxCoId] = useState("");
   const [statsText, setStatsText] = useState("");
+  const [statsOpen, setStatsOpen] = useState(false);
 
   // 거래내역 뷰: ""=거래처별 그룹화, 특정 ID=해당 거래처 flat 테이블
   const [txFilterVendorId, setTxFilterVendorId] = useState("");
@@ -988,21 +989,27 @@ export default function App() {
 
           {/* ── 통계/백업 ── */}
           <section className="card wide">
-            <div className="h">통계 / 백업 (기간 합계)</div>
-            {[["7d","1주"],["1m","1달"],["1y","1년"]].map(([k,l]) => (
-              <div key={k} className="row statsRangeRow" style={{flexWrap:"wrap",gap:8,marginBottom:6}}>
-                <span className="rangeLabel">최근 {l}</span>
-                <button className="btn" onClick={() => loadStats(k)}>합계 조회</button>
-                <button className="btn primary" onClick={() => downloadStatsXlsx(k)}>전체 백업</button>
-                <button className="btn chip chip-sale"
-                  onClick={() => downloadStatsXlsx(k, { kind: "매출" })}>매출만</button>
-                <button className="btn chip chip-buy"
-                  onClick={() => downloadStatsXlsx(k, { kind: "매입" })}>매입만</button>
-              </div>
-            ))}
-            {statsText
-              ? <pre className="statsBox">{statsText}</pre>
-              : <div className="muted small" style={{marginTop:8}}>버튼을 눌러 기간 합계를 확인하세요.</div>}
+            <div className="h accordionHeader" onClick={() => setStatsOpen(o => !o)}
+              style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",userSelect:"none"}}>
+              <span>통계 / 백업 (기간 합계)</span>
+              <span style={{fontSize:12,transition:"transform 0.2s",display:"inline-block",transform:statsOpen?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+            </div>
+            {statsOpen && <>
+              {[["7d","1주"],["1m","1달"],["1y","1년"]].map(([k,l]) => (
+                <div key={k} className="row statsRangeRow" style={{flexWrap:"wrap",gap:8,marginBottom:6}}>
+                  <span className="rangeLabel">최근 {l}</span>
+                  <button className="btn" onClick={() => loadStats(k)}>합계 조회</button>
+                  <button className="btn primary" onClick={() => downloadStatsXlsx(k)}>전체 백업</button>
+                  <button className="btn chip chip-sale"
+                    onClick={() => downloadStatsXlsx(k, { kind: "매출" })}>매출만</button>
+                  <button className="btn chip chip-buy"
+                    onClick={() => downloadStatsXlsx(k, { kind: "매입" })}>매입만</button>
+                </div>
+              ))}
+              {statsText
+                ? <pre className="statsBox">{statsText}</pre>
+                : <div className="muted small" style={{marginTop:8}}>버튼을 눌러 기간 합계를 확인하세요.</div>}
+            </>}
           </section>
 
           {/* ── 거래 내역 ── */}
